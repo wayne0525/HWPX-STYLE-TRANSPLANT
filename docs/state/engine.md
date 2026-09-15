@@ -245,6 +245,15 @@ OK  reference/qualifier/SKILL.md
   - 근거가 없으면 추정하지 않고 missing으로 남긴다.
   - tests/engine/test_rules.py는 unittest로 N개 전부 통과했다.
 
+|- E08: `hwpx/evidence.py`(validate_proposals 추가), `tests/engine/test_evidence.py`를 추가했다. hwpx/rules.py, analyze.py, source.py는 이번 번호에서 변경하지 않았다.
+  - validate_proposals(fields, results, proposals, blocks, normalizedIndex, userEdits)는 규칙 연결 결과와 Solar 제안을 받아 입력란 ID, 인용, 값, 단위 변환을 검증한다.
+  - 등록 필드에 없고 규칙 연결 결과에도 없는 입력란 ID는 invalid_field_id로 차단한다.
+  - 원문에 없는 인용, 근거와 다른 숫자/날짜, 단위 변환 근거 부족은 각각 missing_quote/value_mismatch/unit_unclear로 표시한다.
+  - 복수 근거 중 하나가 원문과 불일치하면 해당 근거에 대해 errors에 기록하고 전체 제안을 막는다.
+  - 사용자 편집 값이 있으면 자동 제안이 덮어쓰지 못하게 user_value_protected로 보호한다.
+  - 규칙 연결 결과가 suggested가 아니면(conflict/review 등) 제안으로 덮어쓰지 않고 blocked/review 상태를 보존한다.
+  - tests/engine/test_evidence.py는 unittest로 10개 전부 통과했다.
+
 ## 남은 문제
 
 - ElementTree 기반 파싱에서는 sourceline/column이 이번 환경의 파이썬 3.11에서 제공되지 않아, 노드 위치 정보의 일부만 남는다. 원본 bytes와 요소 구조/속성/네임스페이스는 보존되지만, 바이트 위치나 줄/칸 위치의 정밀도는 제한적이다.
