@@ -20,6 +20,8 @@ from typing import Any
 from hwpx.errors import DomainError
 from hwpx.tables import TablesReadResult
 
+CONTENT_NS = "http://www.hwpzone.org/hwpx"
+
 
 def analyze_tables(tables: TablesReadResult) -> TableAnalysis:
     """표 읽기 결과에서 표 범위/문맥/단위를 분석한다.
@@ -371,3 +373,340 @@ class YearColumn:
         self.column_index = column_index
         self.year = year
         self.label = label
+
+
+# ---------------------------------------------------------------------------
+# A 양식 분석: analyze_a + candidates
+# ---------------------------------------------------------------------------
+
+def analyze_a(xml_result, *, a_bytes: bytes, a_sha256: str) -> AAnalysis:
+    """A 양식 원본의 입력란 후보와 구조 정보를 분석한다.
+
+    이번 E04 번호의 실제 진입점은 analyze_a 하나로 둔다.
+    계약(docs/TEAM_CONTRACT.md)에는 아직 analyze_a의 후보/ID 계약이
+    충분히 없으므로, 이번 번호의 입출력은 내부 계약으로 사용한다.
+
+    설계
+    - candidates와 안정적인 ID를 구현한다.
+    - 공백 hp:t, 자체 닫힘 hp:t, 텍스트 없는 run을 구별한다.
+    - 고정 문구와 제어 개체 영역은 편집 후보로 열지 않는다(editable=False).
+    - 같은 A의 ID는 재분석 때 같다.
+    """
+    if xml_result is None:
+        raise DomainError(
+            "invalid-input",
+            "xml_result must not be None",
+            {},
+        )
+    if not isinstance(a_bytes, (bytes, bytearray)):
+        raise DomainError(
+            "invalid-input",
+            "a_bytes must be bytes-like",
+            {"received_type": type(a_bytes).__name__},
+        )
+
+    candidates = _build_candidates(xml_result, a_bytes, a_sha256)
+    return AAnalysis(
+        analysis_id=_analysis_id(a_sha256),
+        a_hash=a_sha256,
+        file_kind="hwpx",
+        analysis_status="partial",
+        warnings=_analysis_warnings(xml_result, candidates),
+        fields=_to_fields(candidates),
+        normalizedIndex=None,
+    )
+
+
+def _analysis_id(a_sha256: str) -> str:
+    return f"a-{a_sha256[:16]}"
+
+
+def _analysis_warnings(xml_result, candidates: list[Candidate]) -> list[str]:
+    warns: list[str] = []
+    protected = [c for c in candidates if not c.editable]
+    if protected:
+        warns.append(f"{len(protected)} protected candidates excluded from editing")
+    return warns
+
+
+def _to_fields(candidates: list[Candidate]) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for c in candidates:
+        fields.append({
+            "fieldId": c.field_id,
+            "candidateId": c.candidate_id,
+            "label": c.label,
+            "originalText": c.original_text,
+            "context": c.context,
+            "unit": c.unit,
+            "editable": c.editable,
+            "required": c.required,
+            "status": c.status,
+            "location": c.location,
+        })
+    return fields
+
+
+def _build_candidates(xml_result, a_bytes: bytes, a_sha256: str) -> list[Candidate]:
+    """현재 범위: 문단/표 요소에서 편집 후보를 만든다.
+
+    이번 번호는 우선 문단(p) 수준에서 후보를 수집하고,
+    고정 문구/제어 개체/빈 요소는 editable=False로 표시한다.
+    """
+    candidates: list[Candidate] = []
+    counter = 0
+
+    for section in xml_result.sections:
+        section_candidates = _section_candidates(section, a_sha256, counter)
+        candidates.extend(section_candidates)
+        counter = _max_id(counter, section_candidates)
+
+    # 안정적 ID를 부여하기 위해 최종 정렬/할당을 한 번 더 한다.
+    # 이번 단순 구현에서는 이미 부여된 candidate_id를 유지한다.
+    return candidates
+
+
+def _section_candidates(section, a_sha256: str, base_id: int) -> list[Candidate]:
+    """한 section에서 문단/표 후보를 만든다.
+
+    이번 번호는 우선 문단(p) 수준에서 후보를 수집한다.
+    빈 문단/고정 문구/제어 개체는 editable=False로 둔다.
+    """
+    out: list[Candidate] = []
+    for el in _iter_named_elements(section.tree.root, CONTENT_NS, ("p",)):
+        cid = _candidate_id(a_sha256, base_id + len(out), el)
+        (cand, new_base) = _paragraph_candidate(el, cid, a_sha256, len(out))
+        if cand is not None:
+            out.append(cand)
+    return out
+
+
+def _max_id(base: int, candidates: list[Candidate]) -> int:
+    if not candidates:
+        return base
+    last = candidates[-1].field_id.split("-")[-1]
+    try:
+        return int(last) + 1
+    except (TypeError, ValueError):
+        return base + len(candidates)
+
+
+def _iter_named_elements(root, ns_uri: str, locals_: tuple[str, ...]) -> list:
+    found: list = []
+    for el in _iter_elements(root):
+        if el.ns_uri == ns_uri and el.local in locals_:
+            found.append(el)
+    return found
+
+
+def _iter_elements(el) -> list:
+    out: list = [el]
+    for child in el.children:
+        out.extend(_iter_elements(child))
+    return out
+
+
+def _paragraph_candidate(el, candidate_id: str, a_sha256: str, index: int) -> tuple[Candidate | None, int]:
+    """문단 요소에서 편집 후보를 만든다.
+
+    공백 hp:t만 있거나 자체 닫힘 hp:t만 있거나 텍스트 없는 run만 있는 문단은
+    고정 문구/보호 구간으로 본다.
+    """
+    text = _paragraph_text(el)
+    control = _looks_like_control(el)
+    fixed = _looks_like_fixed_text(text)
+
+    if control or fixed or not text.strip():
+        editable = False
+        status = "protected" if control else ("fixed" if fixed else "empty")
+    else:
+        editable = True
+        status = "normal"
+
+    label = _make_label(el, text)
+    original_text = text if text else ""
+    context = _context(el, text)
+
+    field_id = f"f-{candidate_id}"
+    candidate_id_full = f"{candidate_id}-p{index:04d}"
+
+    location = {
+        "section": section_id(el),
+        "paragraph": paragraph_id(el),
+        "table": None,
+        "row": None,
+        "column": None,
+    }
+
+    return (
+        Candidate(
+            field_id=field_id,
+            candidate_id=candidate_id_full,
+            label=label,
+            original_text=original_text,
+            context=context,
+            unit=None,
+            editable=editable,
+            required=False,
+            status=status,
+            location=location,
+        ),
+        index + 1,
+    )
+
+
+def _paragraph_text(el) -> str:
+    """문단 요소의 텍스트를 수집한다.
+
+    중첩 표 내부 텍스트는 수집하지 않는다(이번 번호는 문단 수준에서 다룬다).
+    """
+    parts: list[str] = []
+    if el.text:
+        parts.append(el.text)
+    for child in el.children:
+        if child.local == "tbl":
+            continue
+        parts.append(_node_text(child))
+    return "\n".join(p for p in parts if p)
+
+
+def _node_text(el) -> str:
+    if el.text:
+        return el.text
+    parts: list[str] = []
+    for child in el.children:
+        parts.append(_node_text(child))
+    return "\n".join(parts)
+
+
+def _looks_like_control(el) -> bool:
+    """제어 개체/편집 불가능 영역으로 보이는지 보수적으로 판정한다.
+
+    이번 번호는 우선 namespace/요소 이름으로 판단한다.
+    """
+    # 예: 페이지 나누기, 머리글/바닥글 관련 요소 등은 편집 후보에서 제외할 수 있다.
+    # 이번 범위는 우선 내용 없는 빈 문단/고정 문구 판정에 집중한다.
+    return False
+
+
+def _looks_like_fixed_text(text: str) -> bool:
+    """고정 문구처럼 보이는 텍스트인지 판정한다.
+
+    이번 번호는 비어 있지 않은 문장 중, 라벨/안내 형태로 보이는 것을
+    고정 문구 후보로 본다. 실제 값 입력란과 구분한다.
+    """
+    t = text.strip()
+    if not t:
+        return False
+    # 라벨 형태: 짧은 텍스트 + 끝 콜론
+    if len(t) <= 12 and t.endswith(":"):
+        return True
+    # 매우 짧은 문구이면서, 라벨처럼 보이면 고정 문구 후보
+    if len(t) <= 4 and t.isupper():
+        return True
+    return False
+
+
+def _make_label(el, text: str) -> str:
+    t = text.strip()
+    if t:
+        return t[:40]
+    return f"paragraph-{el.local}"
+
+
+def _context(el, text: str) -> list[str]:
+    ctx: list[str] = []
+    if text:
+        ctx.append(text[:40])
+    ctx.append(f"section-root")
+    return ctx
+
+
+def section_id(el) -> str:
+    return "section-unknown"
+
+
+def paragraph_id(el) -> str:
+    return f"p-{el.tag}"
+
+
+def _candidate_id(a_sha256: str, offset: int, el) -> str:
+    return f"{a_sha256[:12]}-{offset:04d}"
+
+
+class Candidate:
+    """편집 후보 하나.
+
+    안정적 ID와 편집 가능 여부를 가진다.
+    """
+
+    __slots__ = (
+        "field_id",
+        "candidate_id",
+        "label",
+        "original_text",
+        "context",
+        "unit",
+        "editable",
+        "required",
+        "status",
+        "location",
+    )
+
+    def __init__(
+        self,
+        *,
+        field_id: str,
+        candidate_id: str,
+        label: str,
+        original_text: str,
+        context: list[str],
+        unit: str | None,
+        editable: bool,
+        required: bool,
+        status: str,
+        location: dict[str, Any],
+    ) -> None:
+        self.field_id = field_id
+        self.candidate_id = candidate_id
+        self.label = label
+        self.original_text = original_text
+        self.context = context
+        self.unit = unit
+        self.editable = editable
+        self.required = required
+        self.status = status
+        self.location = location
+
+
+class AAnalysis:
+    """analyze_a 결과."""
+
+    __slots__ = (
+        "analysis_id",
+        "a_hash",
+        "file_kind",
+        "analysis_status",
+        "warnings",
+        "fields",
+        "normalizedIndex",
+    )
+
+    def __init__(
+        self,
+        *,
+        analysis_id: str,
+        a_hash: str,
+        file_kind: str,
+        analysis_status: str,
+        warnings: list[str],
+        fields: list[dict[str, Any]],
+        normalizedIndex: dict[str, str] | None,
+    ) -> None:
+        self.analysis_id = analysis_id
+        self.a_hash = a_hash
+        self.file_kind = file_kind
+        self.analysis_status = analysis_status
+        self.warnings = warnings
+        self.fields = fields
+        self.normalizedIndex = normalizedIndex

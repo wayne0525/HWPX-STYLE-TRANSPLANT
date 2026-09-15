@@ -185,6 +185,30 @@ OK  reference/qualifier/SKILL.md
   - 정상 ZIP 2종은 열리고, 손상/경로 탈출/실제 해제 크기 초과는 DomainError가 발생했다.
   - tests/engine/test_xml.py는 pytest가 없어 현재 환경에서는 pytest로 실행하지 못했지만, unittest runner와 동일한 기대값을 담은 파일로서 존재한다.
 
+## E03/E03b 표 관련 실제 구현 결과
+
+- E03: `hwpx/errors.py`(TABLE_COORD_BAD 추가), `hwpx/tables.py`, `tests/engine/test_tables.py`를 추가했다.
+  - read_tables(xml_result)는 행/열 격자, 병합 범위, 셀 좌표, 셀 원문, 중첩 표 분리를 반환한다.
+  - 중첩 표는 부모 셀 본문과 분리하고, 셀 텍스트를 중복 집계하지 않는다.
+  - 가로/세로/복합 병합과 중첩 표에서 셀 좌표와 원문이 일치하도록 검사했다.
+  - tests/engine/test_tables.py는 unittest로 8개 중 7개 통과, 1개 실패 후 고쳐서 최종 통과했다.
+  - 실제 실행 결과: unittest 8개 전부 통과.
+- E03b: `hwpx/errors.py`(변경 없음, 기존 TABLE_COORD_BAD 유지), `hwpx/analyze.py`, `tests/engine/test_table_scope.py`를 추가했다.
+  - analyze_tables(tables)는 표별 범위/문맥/단위를 분석한다.
+  - 병합 셀 범위로 행 라벨과 다단 열 라벨을 계산한다.
+  - 반복 헤더가 나오면 구역을 새로 시작한다.
+  - 세입/세출 같은 좌우 영역 문맥을 분리한다(이번 단순 구현은 regions 목록으로 남긴다).
+  - 단위는 같은 표의 선언이나 바로 앞 독립 단위 문단에서만 가져온다.
+  - 앞 표 단위(천원)가 다음 표로 상속되지 않는다.
+  - 같은 표 내 전년도/금년도 금액은 별도 필드로 남긴다.
+  - tests/engine/test_table_scope.py는 unittest로 8개 전부 통과했다.
+- E04: `hwpx/analyze.py`(analyze_a 추가), `tests/engine/test_candidates.py`를 추가했다. errors.py는 이번 번호에서 변경하지 않았다.
+  - analyze_a(xml_result, *, a_bytes, a_sha256)는 A 양식 원본의 입력란 후보와 구조 정보를 분석한다.
+  - candidates와 안정적인 ID를 구현했으며, 같은 A의 ID는 재분석 때 같다.
+  - 공백 hp:t, 자체 닫힘 hp:t, 텍스트 없는 run을 구별해 편집 후보/보호 후보를 나눈다.
+  - 고정 문구(라벨 형태)와 제어 개체 영역은 편집 후보로 열지 않는다(editable=False).
+  - tests/engine/test_candidates.py는 unittest로 3개 전부 통과했다.
+
 ## 남은 문제
 
 - ElementTree 기반 파싱에서는 sourceline/column이 이번 환경의 파이썬 3.11에서 제공되지 않아, 노드 위치 정보의 일부만 남는다. 원본 bytes와 요소 구조/속성/네임스페이스는 보존되지만, 바이트 위치나 줄/칸 위치의 정밀도는 제한적이다.
@@ -192,12 +216,17 @@ OK  reference/qualifier/SKILL.md
 - content.hpf의 section href가 ZIP에 실제로 존재하는지, href가 중복되는지 등은 read_xml에서 일부 확인하지만, package 단계와의 경계에서 더 엄격한 검증이 필요할 수 있다.
 - 공통 계약(docs/TEAM_CONTRACT.md)에는 아직 ZIP/XML 읽기 함수의 계약이 없다. 이번 번호의 함수명(read_hwpx, read_xml)과 입출력은 내부 계약으로 사용했으며, 향후 공통 계약에 반영할 수 있다.
 - tests/engine/test_xml.py는 pytest가 없는 현재 환경에서 pytest 수집/실행 결과를 확인하지 못했다. unittest runner로는 동일 기대값이 검증된 상태다.
+- analyze_tables의 표 범위/문맥/단위 분석은 아직 단순 구현이며, 실제 HWPX 표 구조(다양한 병합/헤더/단위 선언 위치)까지 일반화하지 않았다.
+- tests/engine/test_tables.py의 초기 1개 실패는 column_count 기대값 불일치와 MergeGroup type 키워드 불일치였고, 이후 고쳐서 최종 통과했다.
 - `references/08-output-contract.md`에 HWPX를 못 만들 때 DOCX/PDF를 성공 결과로 대신 제공하는 방향의 표현이 남아 있다.
 - `examples/example-04-docx-fallback.md`도 같은 방향의 예시를 담고 있다.
 - 이번 작업에서는 두 파일을 예선 원본으로 보고 수정하지 않기로 했다.
 - 따라서 루트 SKILL.md의 "HWPX를 목표로 하되 DOCX/PDF를 성공 결과로 대신 제공하지 않는다"는 방향과, `references/08-output-contract.md`의 폴백 방향이 충돌한 채로 남아 있다.
 - 이 충돌은 다음 단계에서 예선 원본 수정 범위를 정하거나, 새 폴백 규칙을 따로 정리할 때 함께 다뤄야 한다.
-- 충돌 처리 전까지는 루트 SKILL.md의 절대 규칙이 우선이라는 점만 문서에 남긴다.
+- 이번 충돌 처리 전까지는 루트 SKILL.md의 절대 규칙이 우선이라는 점만 문서에 남긴다.
+- E04 analyze_a는 문단 수준 후보만 다루며, 실제 A 양식 문서의 제어 개체/필드 구조를 일반화하지 않았다.
+- analyze_a의 후보 ID 체계는 sha 기반 오프셋으로 안정성을 확보했지만, 파일 구조가 달라지면 ID가 바뀌는 범위가 있을 수 있다.
+- analyze_a의 고정 문구 판정은 라벨/안내 문구 중심으로만 동작하며, 실제 양식의 다양한 고정 문구를 모두 커버하지 않는다.
 
 ## 다음 번호
 
