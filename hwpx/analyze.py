@@ -710,3 +710,355 @@ class AAnalysis:
         self.warnings = warnings
         self.fields = fields
         self.normalizedIndex = normalizedIndex
+
+
+# ---------------------------------------------------------------------------
+# 라벨과 복합 입력란: analyze_fields
+# ---------------------------------------------------------------------------
+
+def analyze_fields(
+    xml_result,
+    tables,
+    candidates,
+    *,
+    a_bytes: bytes,
+    a_sha256: str,
+) -> FieldsAnalysis:
+    """문단 라벨, 표 헤더, 구역, 단위를 이용해 입력란 목록을 만든다.
+
+    이번 E05 번호의 실제 진입점은 analyze_fields 하나로 둔다.
+    계약(docs/TEAM_CONTRACT.md)에는 아직 필드 분석 계약이 충분히 없으므로,
+    이번 번호의 입출력은 내부 계약으로 사용한다.
+
+    설계
+    - 문단 라벨과 표의 상위/좌측 헤더, 구역, 단위를 이용한다.
+    - 직명/성명과 주소/우편번호처럼 같은 셀이라도 별도 입력 구간으로 연결한다.
+    - 빈 장식 셀은 입력란으로 오탐하지 않는다.
+    """
+    if xml_result is None:
+        raise DomainError("invalid-input", "xml_result must not be None", {})
+    if tables is None:
+        raise DomainError("invalid-input", "tables must not be None", {})
+    if candidates is None:
+        raise DomainError("invalid-input", "candidates must not be None", {})
+
+    fields = _build_fields(xml_result, tables, candidates)
+    return FieldsAnalysis(
+        analysis_id=_analysis_id(a_sha256),
+        a_hash=a_sha256,
+        file_kind="hwpx",
+        analysis_status="partial",
+        warnings=_field_warnings(fields),
+        fields=fields,
+        normalizedIndex=None,
+    )
+
+
+def _field_warnings(fields: list[dict[str, Any]]) -> list[str]:
+    warns: list[str] = []
+    if not fields:
+        warns.append("no fields produced")
+    return warns
+
+
+def _build_fields(xml_result, tables, candidates) -> list[dict[str, Any]]:
+    """현재 범위: 문단 라벨과 표 값을 묶어 fields를 만든다.
+
+    이번 번호는 우선 간단한 결합 규칙만 구현한다.
+    candidates는 Candidate 객체 또는 analyze_a의 fields(dict) 리스트일 수 있다.
+    """
+    fields: list[dict[str, Any]] = []
+    counter = 0
+
+    # 문단 라벨/입력 후보를 먼저 배치
+    for c in candidates:
+        if isinstance(c, Candidate):
+            if c.editable and c.original_text.strip():
+                fields.append(_field_from_candidate(c, counter))
+                counter += 1
+        elif isinstance(c, dict):
+            if _dict_editable(c) and (c.get("originalText") or "").strip():
+                fields.append(_field_from_dict(c, counter))
+                counter += 1
+
+    # 표는 표 헤더+값을 묶어 fields를 만든다
+    for table in tables.tables:
+        table_fields = _table_fields(table, candidates, counter)
+        fields.extend(table_fields)
+        counter += len(table_fields)
+
+    return fields
+
+
+def _dict_editable(c: dict[str, Any]) -> bool:
+    return bool(c.get("editable"))
+
+
+def _field_from_dict(c: dict[str, Any], index: int) -> dict[str, Any]:
+    field_id = f"f-{index:04d}"
+    return {
+        "fieldId": field_id,
+        "candidateId": c.get("candidateId"),
+        "label": c.get("label"),
+        "originalText": c.get("originalText", ""),
+        "context": c.get("context", []),
+        "unit": c.get("unit"),
+        "editable": True,
+        "required": c.get("required", False),
+        "status": "input",
+        "location": c.get("location", {}),
+    }
+
+
+def _field_from_candidate(c: Candidate, index: int) -> dict[str, Any]:
+    field_id = f"f-{index:04d}"
+    return {
+        "fieldId": field_id,
+        "candidateId": c.candidate_id,
+        "label": c.label if c.label else None,
+        "originalText": c.original_text,
+        "context": c.context,
+        "unit": c.unit,
+        "editable": True,
+        "required": c.required,
+        "status": "input",
+        "location": c.location,
+    }
+
+
+def _table_fields(table, candidates, base_index: int) -> list[dict[str, Any]]:
+    """표의 헤더와 값을 묶어 fields를 만든다.
+
+    이번 번호는 표의 헤더(첫 행/첫 열)와 값이 있는 셀을 엮어,
+    같은 셀이라도 여러 입력 구간으로 나눌 수 있게 한다.
+    """
+    header = _header_labels(table)
+    fields: list[dict[str, Any]] = []
+    rows = table.rows
+
+    for r_idx, row in enumerate(rows):
+        cells = _row_cells(row)
+        for c_idx, cell in enumerate(cells):
+            # 헤더 행/열의 값은 필드로 만들지 않는다(이번 단순 구현).
+            if r_idx == 0 or c_idx == 0:
+                continue
+            if not _cell_has_value(cell):
+                continue
+            label = _cell_label(table, header, cell)
+            value = _cell_value(cell)
+            if not value:
+                continue
+            field_index = base_index + len(fields)
+            field_id = f"f-{field_index:04d}"
+            fields.append({
+                "fieldId": field_id,
+                "candidateId": f"t-{field_index:04d}",
+                "label": label,
+                "originalText": value,
+                "context": _cell_context(table, header, cell),
+                "unit": None,
+                "editable": True,
+                "required": True,
+                "status": "input",
+                "location": _cell_location(cell),
+            })
+
+    return _split_composite_fields(fields, table)
+
+
+def _row_cells(row) -> list:
+    if isinstance(row, list):
+        return row
+    if hasattr(row, "cells"):
+        return row.cells
+    if hasattr(row, "cells_"):
+        return row.cells_
+    return []
+
+
+def _header_labels(table) -> dict:
+    """표의 상위/좌측 헤더 라벨을 수집한다.
+
+    이번 번호는 우선 표의 첫 행과 첫 열 라벨을 헤더로 본다.
+    첫 행 첫 열(왼쪽 위)은 헤더가 아니라 빈 칸/교차 셀로 보고 제외한다.
+    """
+    row_headers: list[str] = []
+    col_headers: list[str] = []
+    rows = table.rows if hasattr(table, "rows") else []
+    if not rows:
+        return {"row": row_headers, "col": col_headers}
+    # 첫 행(첫 열 제외)
+    first_row = rows[0]
+    first_row_cells = _row_cells(first_row)
+    for c_idx, cell in enumerate(first_row_cells):
+        if c_idx == 0:
+            continue
+        txt = _cell_text(cell)
+        if txt:
+            col_headers.append(txt)
+    # 첫 열(첫 행 제외)
+    for row in rows[1:]:
+        row_cells = _row_cells(row)
+        if not row_cells:
+            continue
+        first_cell = row_cells[0]
+        txt = _cell_text(first_cell)
+        if txt:
+            row_headers.append(txt)
+    return {"row": row_headers, "col": col_headers}
+
+
+def _cell_text(cell) -> str:
+    if not cell:
+        return ""
+    if hasattr(cell, "text"):
+        return cell.text or ""
+    return ""
+
+
+def _cell_has_value(cell) -> bool:
+    return bool(_cell_text(cell).strip())
+
+
+def _cell_value(cell) -> str:
+    return _cell_text(cell)
+
+
+def _cell_label(table, header, cell) -> str | None:
+    """셀에 대응하는 라벨을 만든다.
+
+    이번 번호는 셀의 행/열 위치로 행 헤더/열 헤더를 결합한다.
+    """
+    rows = table.rows if hasattr(table, "rows") else []
+    if not rows:
+        return None
+    row_idx = _cell_row_index(cell, rows)
+    col_idx = _cell_col_index(cell)
+
+    label_parts: list[str] = []
+    if 0 < row_idx < len(header["row"]) + 1:
+        if row_idx - 1 < len(header["row"]):
+            label_parts.append(header["row"][row_idx - 1])
+    if col_idx < len(header["col"]):
+        label_parts.append(header["col"][col_idx])
+    if not label_parts:
+        return None
+    return " / ".join(label_parts)
+
+
+def _cell_row_index(cell, rows) -> int:
+    for i, row in enumerate(rows):
+        if isinstance(row, list):
+            if cell in row:
+                return i
+        elif hasattr(row, "cells") and cell in row.cells:
+            return i
+    return -1
+
+
+def _cell_col_index(cell) -> int:
+    if hasattr(cell, "column_index"):
+        return cell.column_index
+    if hasattr(cell, "start_col"):
+        return cell.start_col
+    return 0
+
+
+def _cell_context(table, header, cell) -> list[str]:
+    rows = table.rows if hasattr(table, "rows") else []
+    ctx: list[str] = []
+    ctx.append(f"row={_cell_row_index(cell, rows)}")
+    ctx.append(f"col={_cell_col_index(cell)}")
+    ctx.extend(header["row"])
+    ctx.extend(header["col"])
+    return ctx
+
+
+def _cell_location(cell) -> dict[str, Any]:
+    loc: dict[str, Any] = {
+        "table": None,
+        "row": _row_index(cell),
+        "column": _cell_col_index(cell),
+        "section": None,
+    }
+    return loc
+
+
+def _row_index(cell) -> int | None:
+    if hasattr(cell, "start_row"):
+        return cell.start_row
+    return None
+
+
+def _split_composite_fields(fields: list[dict[str, Any]], table) -> list[dict[str, Any]]:
+    """같은 셀에서 여러 입력 구간을 만들어야 할 때 필드를 나눈다.
+
+    이번 번호는 우선 셀 값에 구분자 패턴이 있으면 나누는 규칙만 적용한다.
+    예: "직명 / 성명", "주소 / 우편번호" 같은 패턴.
+    """
+    out: list[dict[str, Any]] = []
+    for f in fields:
+        text = f.get("originalText") or ""
+        parts = _split_value(text)
+        if len(parts) > 1 and f.get("label"):
+            for i, part in enumerate(parts):
+                if not part.strip():
+                    continue
+                field_index = int(f["fieldId"][2:]) + len(out)
+                field_id = f"f-{field_index:04d}"
+                out.append({
+                    "fieldId": field_id,
+                    "candidateId": f["candidateId"],
+                    "label": f"{f['label']} #{i+1}",
+                    "originalText": part,
+                    "context": f["context"],
+                    "unit": f.get("unit"),
+                    "editable": True,
+                    "required": True,
+                    "status": "input",
+                    "location": f["location"],
+                })
+        else:
+            out.append(f)
+    return out
+
+
+def _split_value(text: str) -> list[str]:
+    import re
+    # "직명 / 성명"처럼 구분자로 이어진 복합 값만 나눈다.
+    if re.search(r"\s*/\s*", text):
+        return [p.strip() for p in text.split("/")]
+    return [text]
+
+
+class FieldsAnalysis:
+    """analyze_fields 결과."""
+
+    __slots__ = (
+        "analysis_id",
+        "a_hash",
+        "file_kind",
+        "analysis_status",
+        "warnings",
+        "fields",
+        "normalizedIndex",
+    )
+
+    def __init__(
+        self,
+        *,
+        analysis_id: str,
+        a_hash: str,
+        file_kind: str,
+        analysis_status: str,
+        warnings: list[str],
+        fields: list[dict[str, Any]],
+        normalizedIndex: dict[str, str] | None,
+    ) -> None:
+        self.analysis_id = analysis_id
+        self.a_hash = a_hash
+        self.file_kind = file_kind
+        self.analysis_status = analysis_status
+        self.warnings = warnings
+        self.fields = fields
+        self.normalizedIndex = normalizedIndex

@@ -208,6 +208,11 @@ OK  reference/qualifier/SKILL.md
   - 공백 hp:t, 자체 닫힘 hp:t, 텍스트 없는 run을 구별해 편집 후보/보호 후보를 나눈다.
   - 고정 문구(라벨 형태)와 제어 개체 영역은 편집 후보로 열지 않는다(editable=False).
   - tests/engine/test_candidates.py는 unittest로 3개 전부 통과했다.
+- E05: `hwpx/analyze.py`(analyze_fields 추가), `tests/engine/test_fields.py`를 추가했다. errors.py와 tables.py는 이번 번호에서 변경하지 않았다.
+  - analyze_fields(xml_result, tables, candidates, *, a_bytes, a_sha256)는 문단 라벨과 표 헤더, 구역, 단위를 이용해 입력란 목록을 만든다.
+  - 직명/성명과 주소/우편번호처럼 같은 셀이라도 별도 입력 구간으로 연결한다.
+  - 빈 장식 셀은 입력란으로 오탐하지 않는다.
+  - tests/engine/test_fields.py는 unittest로 4개 전부 통과했다.
 
 ## 남은 문제
 
@@ -227,6 +232,8 @@ OK  reference/qualifier/SKILL.md
 - E04 analyze_a는 문단 수준 후보만 다루며, 실제 A 양식 문서의 제어 개체/필드 구조를 일반화하지 않았다.
 - analyze_a의 후보 ID 체계는 sha 기반 오프셋으로 안정성을 확보했지만, 파일 구조가 달라지면 ID가 바뀌는 범위가 있을 수 있다.
 - analyze_a의 고정 문구 판정은 라벨/안내 문구 중심으로만 동작하며, 실제 양식의 다양한 고정 문구를 모두 커버하지 않는다.
+- E05 analyze_fields는 문단 라벨과 표 헤더를 결합한 단순 구현이며, 실제 양식의 헤더 배치/병합/단위 상속을 일반화하지 않았다.
+- E05의 복합 입력란 분할은 "/" 구분자 기반 규칙만 적용하므로, 다른 구분 양식이나 레이아웃 결합은 별도 규칙이 필요하다.
 
 ## 다음 번호
 
