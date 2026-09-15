@@ -7,9 +7,10 @@ from typing import List, Dict, Any, Optional, Tuple
 
 
 NS_HH = "http://www.hancom.co.kr/hwpml/2011/head"
-NS_HP = "http://www.hancom.co.kr/hwpml/2011/spec"
-ET.register_namespace("hh", NS_HH)
+NS_HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
+NS_HS = "http://www.hancom.co.kr/hwpml/2011/section"
 ET.register_namespace("hp", NS_HP)
+ET.register_namespace("hs", NS_HS)
 
 
 def _local(tag: str) -> str:
@@ -33,6 +34,7 @@ def build_section0(
     heading3_paraPrIDRef: Optional[str] = None,
     caption_charPrIDRef: Optional[str] = None,
     caption_paraPrIDRef: Optional[str] = None,
+    sec_pr_xml: str = "",  # A 원본의 <hp:secPr>...</hp:secPr> XML 문자열
 ) -> bytes:
     """
     B 블록 리스트를 받아 A의 서식 ID만으로 section0.xml 본문을 구성,
@@ -65,7 +67,7 @@ def build_section0(
     cap_cp = caption_charPrIDRef or body_cp
     cap_pp = caption_paraPrIDRef or body_pp
 
-    section = ET.Element(f"{{{NS_HP}}}section")
+    section = ET.Element(f"{{{NS_HS}}}sec")
     section.set("id", "0")
 
     for idx, block in enumerate(blocksB):
@@ -94,48 +96,25 @@ def build_section0(
 
         p = ET.SubElement(section, f"{{{NS_HP}}}p")
         p.set("id", str(idx + 1))
-        p.set("charPrIDRef", str(cp))
+        p.set("styleIDRef", "0")
+        p.set("pageBreak", "0")
+        p.set("columnBreak", "0")
+        p.set("merged", "0")
         p.set("paraPrIDRef", str(pp))
 
-        r = ET.SubElement(p, f"{{{NS_HP}}}r")
-        r.set("id", str(idx + 1))
-        r.set("charPrIDRef", str(cp))
+        run = ET.SubElement(p, f"{{{NS_HP}}}run")
+        run.set("charPrIDRef", str(cp))
 
-        # 첫 paragraph의 run 안에 secPr을 넣는다 (HWPX 렌더링에 필수)
-        if idx == 0 and txt_source:
-            secpr = ET.SubElement(r, f"{{{NS_HP}}}secPr")
-            secpr.set("id", "")
-            secpr.set("textDirection", "HORIZONTAL")
-            secpr.set("spaceColumns", "1134")
-            secpr.set("tabStop", "8000")
-            secpr.set("tabStopVal", "4000")
-            secpr.set("tabStopUnit", "HWPUNIT")
-            secpr.set("outlineShapeIDRef", "1")
-            secpr.set("memoShapeIDRef", "0")
-            secpr.set("textVerticalWidthHead", "0")
-            secpr.set("masterPageCnt", "0")
-            grid = ET.SubElement(secpr, f"{{{NS_HP}}}grid")
-            grid.set("lineGrid", "0")
-            grid.set("charGrid", "0")
-            grid.set("wonggojiFormat", "0")
-            startnum = ET.SubElement(secpr, f"{{{NS_HP}}}startNum")
-            startnum.set("pageStartsOn", "BOTH")
-            startnum.set("page", "0")
-            startnum.set("pic", "0")
-            startnum.set("tbl", "0")
-            startnum.set("equation", "0")
-            visibility = ET.SubElement(secpr, f"{{{NS_HP}}}visibility")
-            visibility.set("hideFirstHeader", "0")
-            visibility.set("hideFirstFooter", "0")
-            visibility.set("hideFirstMasterPage", "0")
-            visibility.set("border", "SHOW_ALL")
-            visibility.set("fill", "SHOW_ALL")
-            visibility.set("hideFirstPageNum", "0")
-            visibility.set("hideFirstEmptyLine", "0")
-            visibility.set("showLineNumber", "0")
+        # 첫 paragraph의 run 안에 A 원본 secPr을 그대로 삽입 (페이지 정보 포함)
+        if idx == 0 and sec_pr_xml:
+            # secPr XML에 네임스페이스 선언이 없으면 파싱 불가 — 선언 추가
+            ns_decl = ' xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section"'
+            fixed = sec_pr_xml.replace("<hp:secPr", "<hp:secPr" + ns_decl, 1)
+            sec_pr_el = ET.fromstring(fixed)
+            run.append(sec_pr_el)
 
         if txt_source:
-            t = ET.SubElement(r, f"{{{NS_HP}}}t")
+            t = ET.SubElement(run, f"{{{NS_HP}}}t")
             t.text = txt_source
 
         # 모든 paragraph 끝에 linesegarray 추가 (줄 배치 정보 — 없으면 텍스트 위치 안 잡힘)
@@ -243,11 +222,28 @@ def assemble_C(
         tmpA = open_hwpx(fileA_path)
         secA_path = find_in_tmp(tmpA, "Contents/section0.xml")
         secA_text = ""
+        sec_pr_xml = ""  # A 원본의 secPr XML (page 정보 포함)
         if secA_path:
             with open(secA_path, "r", encoding="utf-8") as f:
                 secA_text = f.read()
+            import re as _re
+            m = _re.search(r'<hp:secPr[^>]*>.*?</hp:secPr>', secA_text, _re.DOTALL)
+            if m:
+                sec_pr_xml = m.group(0)
         profA = build_style_profile(tmpA, fileA_path, section_xml_text=secA_text)
         close_hwpx(tmpA)
+    else:
+        # profA가 dict로 제공됨 — A 파일에서 secPr XML 추출
+        import re as _re
+        tmpA2 = open_hwpx(fileA_path)
+        secA_path2 = find_in_tmp(tmpA2, "Contents/section0.xml")
+        if secA_path2:
+            with open(secA_path2, "r", encoding="utf-8") as f:
+                secA_text2 = f.read()
+            m = _re.search(r'<hp:secPr[^>]*>.*?</hp:secPr>', secA_text2, _re.DOTALL)
+            if m:
+                sec_pr_xml = m.group(0)
+        close_hwpx(tmpA2)
 
     role_map = build_role_map(profA)
 
@@ -265,6 +261,7 @@ def assemble_C(
         heading3_paraPrIDRef=role_map.get("heading3", role_map["body"])[1],
         caption_charPrIDRef=role_map.get("caption", role_map["body"])[0],
         caption_paraPrIDRef=role_map.get("caption", role_map["body"])[1],
+        sec_pr_xml=sec_pr_xml,
     )
 
     # 임시 디렉토리에 A_style.hwpx 풀기
