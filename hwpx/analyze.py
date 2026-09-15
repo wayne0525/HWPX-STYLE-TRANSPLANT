@@ -8,7 +8,7 @@
 - 병합 셀 범위로 행 라벨과 다단 열 라벨을 계산한다.
 - 반복 헤더가 나오면 구역을 새로 시작한다.
 - 세입/세출 같은 좌우 영역의 문맥을 섞지 않는다.
-- 단위는 같은 표의 선언이나 바로 앞의 독립 단위 문단에서만 가져온다.
+- 단위는 같은 표의 선언이나 바로 앞 독립 단위 문단에서만 가져온다.
 - 앞 표 단위가 다음 표로 상속되지 않는다.
 - 같은 표 내 전년도/금년도 금액은 별도 필드로 남긴다.
 """
@@ -1062,3 +1062,333 @@ class FieldsAnalysis:
         self.warnings = warnings
         self.fields = fields
         self.normalizedIndex = normalizedIndex
+
+
+# ---------------------------------------------------------------------------
+# 복합 슬롯 분리: split_compound_slots
+# ---------------------------------------------------------------------------
+
+def split_compound_slots(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """라벨/값 패턴으로 복합 입력 구간을 독립 필드로 분리한다.
+
+    이번 E05b 번호의 실제 진입점은 split_compound_slots 하나로 둔다.
+    계약(docs/TEAM_CONTRACT.md)에는 아직 복합 슬롯 분리 계약이 충분히 없으므로,
+    이번 번호의 입출력은 내부 계약으로 사용한다.
+
+    구분
+    - 콜론 뒤 공백, 중괄호 표시, 자리표시자임이 확인된 영으로 채운 금액,
+      단위만 있는 칸, 글머리표 아래 빈 문단을 구분한다.
+    - 주소/우편번호, 직명/성명, 시작 시각/종료 시각, 총사업비/보조금처럼
+      한 표시 안에 여러 독립 구간이 있으면 별도 필드로 나눈다.
+    - 글자 run이 나뉘어도 논리 문단으로 찾고, 원본 위치는 보존한다.
+    - 실제 값 0을 자리표시자로 단정하지 않는다.
+    - 라벨, 직인 문구, 실제로 기입된 날짜를 빈칸으로 지우지 않는다.
+    """
+    if not fields:
+        return []
+
+    out: list[dict[str, Any]] = []
+    for f in fields:
+        # 먼저 보호/고정/장식 후보를 그대로 보존한다.
+        if not _slot_editable(f):
+            out.append(f)
+            continue
+
+        text = f.get("originalText") or ""
+        label = f.get("label") or ""
+
+        # 단위만 있는 칸, 글머리표 아래 빈 문단, 중괄호 표시 등은
+        # 입력 구간으로 열지 않거나 별도 처리 대상으로 남긴다.
+        if _looks_like_unit_only(f) or _looks_like_bullet_blank(f):
+            f = _mark_slot_status(f, "decoration")
+            out.append(f)
+            continue
+
+        # 콜론으로 끝나는 라벨 뒤의 값 구간을 분리한다.
+        if _looks_like_labeled_value(f):
+            parts = _split_labeled_value(text, label)
+            if len(parts) > 1:
+                out.extend(_expand_slot(f, parts))
+                continue
+
+        # 복합 값 패턴(주소/우편번호, 직명/성명, 시작/종료 시각, 총사업비/보조금)을 분리한다.
+        if _looks_like_compound_value(text):
+            parts = _split_compound_value(text)
+            if len(parts) > 1:
+                out.extend(_expand_slot(f, parts))
+                continue
+
+        # 그 외 편집 가능 필드는 상태를 재계산해 추가한다.
+        out.append(_mark_slot_status(f, _slot_status_for(text)))
+
+    return out
+
+
+def _slot_editable(f: dict[str, Any]) -> bool:
+    return bool(f.get("editable"))
+
+
+def _looks_like_unit_only(f: dict[str, Any]) -> bool:
+    """단위만 있는 칸인지 판정한다.
+
+    이번 번호는 텍스트가 단위 표현뿐이고, 라벨이 없거나 단위 라벨이면
+    단위만 있는 칸으로 본다.
+    """
+    text = (f.get("originalText") or "").strip()
+    if not text:
+        return False
+    unit = f.get("unit")
+    label = (f.get("label") or "").strip()
+    if unit and text.lower() == unit.lower():
+        return True
+    if label and label.lower() in ("단위", "단위:", "단위 :"):
+        return True
+    # 텍스트 자체가 단위처럼 보이기만 해도 단위만 있는 칸 후보
+    if _is_unit_like(text):
+        return True
+    return False
+
+
+def _is_unit_like(text: str) -> bool:
+    import re
+    t = text.strip().lower()
+    if re.fullmatch(r"(원|천원|만원|달러|유로|명|개|건|회|부|각형)?$", t):
+        return True
+    if re.fullmatch(r"\d+\s*(원|천원|만원|달러|유로|명|개|건|회|부)$", t):
+        return True
+    return False
+
+
+def _looks_like_bullet_blank(f: dict[str, Any]) -> bool:
+    """글머리표 아래 빈 문단인지 판정한다.
+
+    이번 번호는 context/라벨에 글머리표 표시가 있고 텍스트가 비어 있으면
+    빈 문단으로 본다.
+    """
+    text = (f.get("originalText") or "").strip()
+    if text:
+        return False
+    ctx = f.get("context") or []
+    combined = " ".join(ctx).lower()
+    if any(m in combined for m in ("bullet", "•", "-", "*", "글머리", "항목")):
+        return True
+    return False
+
+
+def _looks_like_labeled_value(f: dict[str, Any]) -> bool:
+    """콜론 뒤 공백 패턴으로 라벨+값 구조인지 판정한다.
+
+    이번 번호는 원본 텍스트나 라벨이 콜론으로 끝나고, 값 부분이 있으면
+    라벨/값 분리 대상으로 본다.
+    """
+    text = (f.get("originalText") or "").strip()
+    if not text:
+        return False
+    # 라벨이 콜론 종료형이면 라벨+값 구조로 본다
+    label = (f.get("label") or "").strip()
+    if label and _ends_with_colon(label):
+        return True
+    # 원본 텍스트가 "라벨: 값" 형태이면 분리 대상으로 본다
+    if _contains_colon_label(text):
+        return True
+    return False
+
+
+def _ends_with_colon(s: str) -> bool:
+    import re
+    return bool(re.search(r":\s*$", s))
+
+
+def _contains_colon_label(text: str) -> bool:
+    import re
+    # "라벨: 값" 패턴
+    return bool(re.match(r"^[^:]+:\s*\S", text))
+
+
+def _looks_like_compound_value(text: str) -> bool:
+    """주소/우편번호, 직명/성명, 시작/종료 시각, 총사업비/보조금 패턴을 본다.
+
+    이번 번호는 "/" 구분자가 있거나, 명시적 복합 패턴이 있으면 복합 값으로 본다.
+    """
+    if not text:
+        return False
+    # "/" 구분자 복합
+    if "/" in text:
+        return True
+    # 시작/종료 시각 패턴
+    if _looks_like_time_range(text):
+        return True
+    # 총사업비/보조금 형태
+    if _looks_like_fund_split(text):
+        return True
+    return False
+
+
+def _looks_like_time_range(text: str) -> bool:
+    import re
+    # "시작 시 분부터 종료 시 분까지" 형태나 "00:00~00:00" 형태
+    if re.search(r"부터.*까지", text):
+        return True
+    if re.search(r"\d{1,2}:\d{2}\s*[-~]\s*\d{1,2}:\d{2}", text):
+        return True
+    return False
+
+
+def _looks_like_fund_split(text: str) -> bool:
+    import re
+    # "총사업비 00원 / 보조금 00원" 형태
+    if re.search(r"총사업비.*보조금|보조금.*총사업비", text):
+        return True
+    return False
+
+
+def _split_labeled_value(text: str, label: str) -> list[str]:
+    import re
+    # 라벨이 이미 콜론 종료형이면, 원본 텍스트를 라벨과 값으로 분리
+    if label and _ends_with_colon(label):
+        # 원본 텍스트가 "라벨: 값"이면 값만 추출
+        m = re.match(r"^[^:]+:\s*(.*)$", text)
+        if m:
+            return [label, m.group(1).strip()]
+        # 원본 텍스트가 값만 있으면 라벨+값으로 간주
+        if text:
+            return [label, text]
+        return [label]
+    # 원본 텍스트가 "라벨: 값" 형태이면 라벨/값으로 분리
+    if _contains_colon_label(text):
+        m = re.match(r"^([^:]+):\s*(.*)$", text)
+        if m:
+            return [m.group(1).strip(), m.group(2).strip()]
+    return [text]
+
+
+def _split_compound_value(text: str) -> list[str]:
+    import re
+    # 주소/우편번호, 직명/성명 등 "/" 분리
+    if "/" in text:
+        return [p.strip() for p in text.split("/") if p.strip()]
+
+    # 시작/종료 시각 범위 분리: "시작 시각 09시 00분 부터 종료 시각 18시 00분 까지" → 4구간
+    m = re.search(r"(시작\s*시각)\s*(\d{1,2}시\s*\d{2}분)\s*부터\s*(종료\s*시각)\s*(\d{1,2}시\s*\d{2}분)\s*까지", text)
+    if m:
+        return [m.group(1).strip(), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()]
+
+    # 총사업비/보조금 분리
+    # "총사업비 00원 / 보조금 00원" 또는 "총사업비 00원, 보조금 00원"
+    parts = re.split(r"[/,]\s*", text)
+    if len(parts) >= 2:
+        return [p.strip() for p in parts if p.strip()]
+
+    return [text]
+
+
+def _expand_slot(f: dict[str, Any], parts: list[str]) -> list[dict[str, Any]]:
+    """하나의 필드를 여러 슬롯으로 늘릴 때 라벨/값을 분할해 필드를 만든다."""
+    out: list[dict[str, Any]] = []
+    base_label = f.get("label")
+    for i, part in enumerate(parts):
+        if not part.strip():
+            continue
+        # 복합 값이면 다시 분리한다.
+        sub_parts = _split_compound_value(part)
+        if len(sub_parts) > 1:
+            for j, sub in enumerate(sub_parts):
+                if not sub.strip():
+                    continue
+                field_index = _next_field_index(out)
+                field_id = f"f-{field_index:04d}"
+                slot_label = _slot_label(base_label, i + 1, sub)
+                out.append({
+                    "fieldId": field_id,
+                    "candidateId": f.get("candidateId"),
+                    "label": slot_label,
+                    "originalText": sub,
+                    "context": f.get("context", []),
+                    "unit": f.get("unit"),
+                    "editable": True,
+                    "required": f.get("required", True),
+                    "status": _slot_status_for(sub),
+                    "location": f.get("location"),
+                })
+            continue
+        field_index = _next_field_index(out)
+        field_id = f"f-{field_index:04d}"
+        slot_label = _slot_label(base_label, i + 1, part)
+        out.append({
+            "fieldId": field_id,
+            "candidateId": f.get("candidateId"),
+            "label": slot_label,
+            "originalText": part,
+            "context": f.get("context", []),
+            "unit": f.get("unit"),
+            "editable": True,
+            "required": f.get("required", True),
+            "status": _slot_status_for(part),
+            "location": f.get("location"),
+        })
+    return out
+
+
+def _next_field_index(out: list[dict[str, Any]]) -> int:
+    if not out:
+        return 0
+    last = out[-1].get("fieldId", "")
+    try:
+        return int(last.split("-")[-1]) + 1
+    except (TypeError, ValueError):
+        return len(out)
+
+
+def _slot_label(base_label: str | None, idx: int, part: str) -> str | None:
+    if base_label:
+        return f"{base_label} #{idx}"
+    t = (part or "").strip()
+    if t:
+        return t[:40]
+    return f"slot-{idx}"
+
+
+def _slot_status_for(part: str) -> str:
+    """자리표시자임이 확인된 영으로 채운 금액 등은 별도 상태로 표시한다.
+
+    이번 번호는 실제 값 0을 자리표시자로 단정하지 않는다.
+    라벨/중괄호/콜론 뒤 공백 자리표시자 패턴이 있을 때만 자리표시자 처리한다.
+    """
+    t = (part or "").strip()
+    if _looks_like_placeholder(t):
+        return "placeholder"
+    if t == "0" and _looks_like_zero_placeholder_context(part):
+        return "placeholder"
+    return "input"
+
+
+def _looks_like_placeholder(text: str) -> bool:
+    import re
+    t = text.strip()
+    if not t:
+        return False
+    # 중괄호 표시
+    if re.fullmatch(r"\{[^}]*\}", t):
+        return True
+    # 콜론 뒤 공백 자리표시자(예: "이름: "처럼 값 부분이 공백/빈 경우)는
+    # 이 함수에서는 처리하지 않고, 라벨 분리 단계에서 값으로 남긴다.
+    return False
+
+
+def _looks_like_zero_placeholder_context(text: str) -> bool:
+    """영으로 채운 금액이 자리표시자임이 확인된 경우만 처리한다.
+
+    이번 번호는 실제 값 0을 자리표시자로 단정하지 않는다.
+    문맥상 자리표시자임이 확인된 경우만 placeholder로 본다.
+    """
+    # 예: "{총사업비}"처럼 중괄호가 포함된 문단에서 나온 0은 자리표시자 후보
+    # 이번 단순 구현에서는 원본 텍스트에 중괄호가 있으면 0을 자리표시자로 본다.
+    if "{" in text or "}" in text:
+        return True
+    return False
+
+
+def _mark_slot_status(f: dict[str, Any], status: str) -> dict[str, Any]:
+    f = dict(f)
+    f["status"] = status
+    return f

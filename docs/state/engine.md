@@ -213,6 +213,14 @@ OK  reference/qualifier/SKILL.md
   - 직명/성명과 주소/우편번호처럼 같은 셀이라도 별도 입력 구간으로 연결한다.
   - 빈 장식 셀은 입력란으로 오탐하지 않는다.
   - tests/engine/test_fields.py는 unittest로 4개 전부 통과했다.
+- E05b: `hwpx/analyze.py`(split_compound_slots 추가), `tests/engine/test_compound_slots.py`를 추가했다. errors.py와 tables.py는 이번 번호에서 변경하지 않았다.
+  - split_compound_slots(fields)는 라벨/값 패턴으로 복합 입력 구간을 독립 필드로 분리한다.
+  - 콜론 뒤 공백, 중괄호 표시, 자리표시자임이 확인된 영으로 채운 금액, 단위만 있는 칸, 글머리표 아래 빈 문단을 구분한다.
+  - 주소/우편번호, 직명/성명, 시작 시각/종료 시각, 총사업비/보조금처럼 한 표시 안에 여러 독립 구간이 있으면 별도 필드로 나눈다.
+  - 글자 run이 나뉘어도 논리 문단으로 찾고, 원본 위치는 보존한다.
+  - 실제 값 0을 자리표시자로 단정하지 않는다.
+  - 라벨, 직인 문구, 실제로 기입된 날짜를 빈칸으로 지우지 않는다.
+  - tests/engine/test_compound_slots.py는 unittest로 14개 전부 통과했다.
 
 ## 남은 문제
 
@@ -234,6 +242,8 @@ OK  reference/qualifier/SKILL.md
 - analyze_a의 고정 문구 판정은 라벨/안내 문구 중심으로만 동작하며, 실제 양식의 다양한 고정 문구를 모두 커버하지 않는다.
 - E05 analyze_fields는 문단 라벨과 표 헤더를 결합한 단순 구현이며, 실제 양식의 헤더 배치/병합/단위 상속을 일반화하지 않았다.
 - E05의 복합 입력란 분할은 "/" 구분자 기반 규칙만 적용하므로, 다른 구분 양식이나 레이아웃 결합은 별도 규칙이 필요하다.
+- E05b split_compound_slots는 분석 결과 fields에 적용하는 후처리 함수이며, 실제 HWPX 문단/표에서 직접 슬롯을 찾는 단계는 아직 analyze_fields와 분리되어 있다.
+- E05b의 시간 범위/재원 분할 regex는 이번에 명시한 패턴만 다루며, 다른 시각 표기나 재원 구분 표현은 별도 규칙이 필요하다.
 
 ## 다음 번호
 
