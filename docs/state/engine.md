@@ -221,6 +221,13 @@ OK  reference/qualifier/SKILL.md
   - 실제 값 0을 자리표시자로 단정하지 않는다.
   - 라벨, 직인 문구, 실제로 기입된 날짜를 빈칸으로 지우지 않는다.
   - tests/engine/test_compound_slots.py는 unittest로 14개 전부 통과했다.
+- E06: `hwpx/source.py`(extract_b 추가), `tests/engine/test_source.py`를 추가했다. errors.py와 tables.py는 이번 번호에서 변경하지 않았다.
+  - extract_b(payload, *, kind=None, b_hash=None)는 HWPX/TXT/MD/UTF-8 붙여넣기를 SourceBlock으로 추출한다.
+  - 원문 순서와 표 문맥을 보존하고, B 서식(글꼴, 스타일 ID, XML, 이미지, 페이지 나누기)은 가져오지 않는다.
+  - 긴 블록은 원문 위치가 유지되는 하위 블록으로 나눈다.
+  - 중첩 표와 여러 section에서 중복이나 순서 뒤바뀜이 없도록 했다.
+  - 텍스트 재결합이 원문과 일치하도록 했다.
+  - tests/engine/test_source.py는 unittest로 13개 전부 통과했다.
 
 ## 남은 문제
 
@@ -244,6 +251,8 @@ OK  reference/qualifier/SKILL.md
 - E05의 복합 입력란 분할은 "/" 구분자 기반 규칙만 적용하므로, 다른 구분 양식이나 레이아웃 결합은 별도 규칙이 필요하다.
 - E05b split_compound_slots는 분석 결과 fields에 적용하는 후처리 함수이며, 실제 HWPX 문단/표에서 직접 슬롯을 찾는 단계는 아직 analyze_fields와 분리되어 있다.
 - E05b의 시간 범위/재원 분할 regex는 이번에 명시한 패턴만 다루며, 다른 시각 표기나 재원 구분 표현은 별도 규칙이 필요하다.
+- E06 extract_b는 B를 텍스트 블록으로 추출하는 단계이며, 표 문맥(행/열/병합)을 SourceBlock에 연결하는 단계는 아직 별도 처리가 필요하다.
+- E06의 HWPX 텍스트 추출은 XML 태그를 제거하고 텍스트만 남기므로, 실제 HWPX의 문단/표 구조를 보존한 채 추출하려면 추후 구조 보존 추출이 필요하다.
 
 ## 다음 번호
 
