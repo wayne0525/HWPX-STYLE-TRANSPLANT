@@ -80,6 +80,77 @@ OK  reference/qualifier/SKILL.md
 - 검사 목록 중 "P02 항목이 다음 단계로만 적혀 있는지"는 이전 시점에 확인한 항목이다. 현재는 P02가 아직 미정이며, 다음 준비 항목으로만 적혀 있다.
 - 루트 SKILL.md와 `references/08-output-contract.md`의 폴백 방향이 충돌하는지는 문서로 확인했지만, 이 충돌을 해결하거나 재심소한 것은 아니다.
 
+## TEAM_CONTRACT 전체 점검 결과
+
+- 점검 대상: `docs/TEAM_CONTRACT.md`
+- 점검 기준: `docs/DESIGN.md`, `PROJECT_BLUEPRINT.md`, `docs/WORK_RULES.md`, 루트 `SKILL.md`
+- 점검 방식: A 분석 → B 추출 → 규칙 연결 → Solar 제안 → 근거 검사 → 사용자 검토 → 생성 → 결과 검증 → 보고서/미리보기까지 각 단계의 반환값이 다음 단계의 입력으로 실제로 이어지는지 확인했다.
+
+### 이어진 흐름으로 확인한 부분
+
+- A 분석 결과(`fields`, `blocks`, `aHash`, `analysis_status`)는 규칙 연결 입력과 Solar 배치 구성에 이어 쓸 수 있다.
+- 규칙 연결 결과(`RuleResult` 배열)와 B 원문 블록(`SourceBlock` 배열)은 Solar 제안 빌드와 근거 검증 입력으로 이어 쓸 수 있다.
+- Solar 제안 응답(`proposals`)은 근거 검증과 사용자 검토 입력으로 이어 쓸 수 있다.
+- 근거 검증 결과(`validation`)와 사용자 보정/편집(`corrections`, `edits`)은 생성 입력으로 이어 쓸 수 있다.
+- 생성 결과(`resultBytes`, `changedFields`, `summary`, `warnings`)는 보고서와 미리보기로 이어 쓸 수 있다.
+
+### 계약 안에서 표현이 다른 부분
+
+- A 분석 계약은 정규화 인덱스(`normalizedIndex`)를 명시적으로 반환한다고 적어 두지 않았는데, 규칙 연결 계약은 이 값을 입력으로 받는다.
+- `evidence` / `sourceBlockIds` / `evidenceQuote`의 관계가 규칙 연결, Solar 제안, 근거 검증, 편집 검증에서 서로 조금씩 다른 표현으로 적혀 있다.
+- 생성 계약의 `changedFields`와 보고서/미리보기의 `changedParts`, `summary`와 보고서 요약은 연결 문장은 넣었지만, 완전 동일한 키/타입으로 통일한 상태는 아니다.
+
+### 이번 점검에서 맞춘 부분
+
+- A 분석 입력란 필드 목록을 본문 정의와 예시에서 맞췄다.
+  - 선택 필드로 `status`를 추가했다.
+  - 9장 예시를 카멜케이스로 바꾸고, 본문 정의와 겹치게 `fieldId`, `candidateId`, `originalText`, `context`, `unit`, `editable`, `required`, `status`, `location`을 포함한 최소 예시로 수정했다.
+  - `location` 내부 키는 아직 전체 스키마가 정해지지 않아 예시에서도 임시 표기로만 남겼다.
+- 생성 결과 → 보고서/미리보기로 이어지는 문장을 보강했다.
+  - `changedFields`가 `changedParts`의 출처로 쓰일 수 있다는 점을 명시했다.
+  - `summary`가 보고서 요약의 출처로 쓰일 수 있다는 점을 명시했다.
+  - 미리보기가 생성 결과에서 재추출된다는 점과 못 만든 상태 표현도 다시 남겼다.
+
+### 아직 통일하지 못한 부분
+
+- `normalizedIndex`의 반환/입력 정의
+- `evidence` / `sourceBlockIds` / `evidenceQuote` 관계 표현
+- 상태 값 전체 명칭
+- 실패/누락 코드 체계
+- 해시 알고리즘
+- 위치 객체 내부 키 전체
+- 긴 블록 나누기 기준
+- 이미지·비텍스트 개체 처리
+
+### 다른 문서와 충돌해서 아직 결정 못 한 부분
+
+- `references/08-output-contract.md`와 `examples/example-04-docx-fallback.md`의 DOCX/PDF 폴백 방향
+- 이 충돌은 예선 원본 수정 범위를 정하거나 새 폴백 규칙을 만들 때 함께 다뤄야 한다.
+- 지금은 루트 SKILL.md의 절대 규칙이 우선이라는 점만 문서에 남긴다.
+
+## 코드/함수 구현 상태
+
+- 이번 단계에서 함수 코드나 테스트 코드는 만들지 않았다.
+- 계약에 적힌 함수는 설계 표기이며 실제 구현을 완료한 것이 아니다.
+  - `hwpx/analyze.py` / `analyze_a`
+  - `hwpx/source.py` / `extract_b`
+  - `hwpx/rules.py` / `connect_rules`
+  - `solar/batches.py` / `build_solar_batch`
+  - `solar/client.py` / `propose_solar`
+  - `hwpx/evidence.py` / `validate_proposals`
+  - `hwpx/evidence.py` / `validate_edits`
+  - `hwpx/corrections.py` / `correct_candidates`
+  - `hwpx/generate.py` / `generate_result`
+- 실행하지 않은 테스트나 미구현 함수를 완료로 표시하지 않는다.
+- 이번 점검은 문서 검토 결과이며, 구현이나 성능이 검증됐다고 기록하지 않는다.
+
+## 남은 의존성
+
+- 함수 구현은 하지 않았으므로 실제 입력/출력 검증은 아직 불가능하다.
+- 정규화 인덱스, 증거 필드 관계, 상태/코드 체계, 위치 객체 내부 키, 긴 블록 나누기 기준은 계약 보완이 더 필요하다.
+- DOCX/PDF 폴백 충돌은 예선 원본 수정 범위나 새 폴백 규칙을 정할 때 함께 정리해야 한다.
+- 다음 단계로 넘어가려면 위 미정 항목 중 우선 정리할 항목을 먼저 정해야 한다.
+
 ## 남은 문제
 
 - `references/08-output-contract.md`에 HWPX를 못 만들 때 DOCX/PDF를 성공 결과로 대신 제공하는 방향의 표현이 남아 있다.
