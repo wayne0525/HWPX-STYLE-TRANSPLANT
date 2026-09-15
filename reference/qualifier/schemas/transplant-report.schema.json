@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hwpx-skill/transplant-report",
+  "title": "TransplantReport",
+  "description": "Internal + fields that feed the user-facing summary. Do not include A or B full text.",
+  "type": "object",
+  "required": ["roleMap", "applied", "gaps", "output"],
+  "properties": {
+    "roleMap": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fromB", "toASlot", "fallback"],
+        "properties": {
+          "fromB": { "type": "string" },
+          "toASlot": { "type": "string" },
+          "fallback": { "type": "boolean" },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "applied": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": { "type": "string" },
+          "valueFromA": { "type": "string" },
+          "status": { "enum": ["yes", "estimate", "no"] }
+        }
+      }
+    },
+    "gaps": { "type": "array", "items": { "type": "string" } },
+    "qa": {
+      "type": "object",
+      "properties": {
+        "aSentencesFoundInC": { "type": "boolean" },
+        "bodyFontMatchesA": { "type": "boolean" },
+        "lineSpacingHasPercent": { "type": "boolean" },
+        "tableCellsMatchB": { "type": "boolean" },
+        "estimatesLabeled": { "type": "boolean" }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["format", "fileName"],
+      "properties": {
+        "format": { "enum": ["hwpx", "docx", "pdf"] },
+        "fileName": { "type": "string" },
+        "fallbackReason": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
