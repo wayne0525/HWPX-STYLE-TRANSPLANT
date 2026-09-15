@@ -74,6 +74,9 @@ NS_MIXED = "ns-mixed"
 SECTION_ORDER_BAD = "section-order-bad"
 """content.hpf 기준 section 순서가 기대와 다름"""
 
+TABLE_COORD_BAD = "table-coord-bad"
+"""표 격자/병합/셀 좌표 구성에서 허용하지 않는 상태"""
+
 DUPLICATE_PATH = "duplicate-path"
 """ZIP 내 동일 경로가 둘 이상"""
 
