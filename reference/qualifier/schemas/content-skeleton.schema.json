@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hwpx-skill/content-skeleton",
+  "title": "ContentSkeletonB",
+  "description": "Fill from file B only. Preserve text verbatim. Do not store B fonts, colors, or page margins.",
+  "type": "object",
+  "required": ["sourceFile", "blocks"],
+  "properties": {
+    "sourceFile": { "type": "string" },
+    "extraction": {
+      "type": "object",
+      "properties": {
+        "method": { "enum": ["xml", "text-export", "visual-estimate", "mixed"] }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "properties": {
+        "paragraphCount": { "type": "integer" },
+        "tableCount": { "type": "integer" },
+        "imageCount": { "type": "integer" },
+        "charCountApprox": { "type": "integer" }
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "enum": [
+              "title",
+              "heading",
+              "paragraph",
+              "listItem",
+              "table",
+              "image",
+              "caption",
+              "footnote",
+              "pageBreak",
+              "quote",
+              "equation",
+              "textbox",
+              "headerText",
+              "footerText"
+            ]
+          },
+          "level": { "type": ["integer", "null"] },
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["text"],
+              "properties": {
+                "text": { "type": "string" },
+                "bold": { "type": "boolean" },
+                "italic": { "type": "boolean" },
+                "underline": { "type": "boolean" },
+                "emphasis": { "type": "boolean" }
+              }
+            }
+          },
+          "text": { "type": "string" },
+          "listMarker": { "type": ["string", "null"] },
+          "listDepth": { "type": ["integer", "null"] },
+          "table": {
+            "type": "object",
+            "properties": {
+              "rows": { "type": "integer" },
+              "cols": { "type": "integer" },
+              "colWidthsRel": {
+                "type": "array",
+                "items": { "type": "number" }
+              },
+              "cells": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["r", "c", "text"],
+                  "properties": {
+                    "r": { "type": "integer" },
+                    "c": { "type": "integer" },
+                    "rowspan": { "type": "integer" },
+                    "colspan": { "type": "integer" },
+                    "text": { "type": "string" },
+                    "header": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "image": {
+            "type": "object",
+            "properties": {
+              "binaryItemIDRef": { "type": ["string", "null"] },
+              "fileName": { "type": ["string", "null"] },
+              "alt": { "type": ["string", "null"] },
+              "moved": { "type": "boolean" }
+            }
+          },
+          "unsupported": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

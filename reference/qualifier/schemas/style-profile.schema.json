@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hwpx-skill/style-profile",
+  "title": "StyleProfileA",
+  "description": "Fill from file A only. No sentences from A. unknown is allowed; invented numbers are not.",
+  "type": "object",
+  "required": ["sourceFile", "page", "roles", "notes"],
+  "properties": {
+    "sourceFile": { "type": "string" },
+    "extraction": {
+      "type": "object",
+      "properties": {
+        "method": { "enum": ["xml", "visual-estimate", "mixed"] },
+        "openedHeaderXml": { "type": "boolean" }
+      }
+    },
+    "page": {
+      "type": "object",
+      "required": ["paper", "orientation"],
+      "properties": {
+        "paper": { "type": "string", "description": "A4, B5, or widthMm x heightMm" },
+        "orientation": { "enum": ["portrait", "landscape", "unknown"] },
+        "marginMm": {
+          "type": "object",
+          "properties": {
+            "top": { "type": ["number", "null"] },
+            "bottom": { "type": ["number", "null"] },
+            "left": { "type": ["number", "null"] },
+            "right": { "type": ["number", "null"] },
+            "header": { "type": ["number", "null"] },
+            "footer": { "type": ["number", "null"] }
+          }
+        },
+        "columns": { "type": ["integer", "null"] }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "required": ["body"],
+      "properties": {
+        "documentTitle": { "$ref": "#/$defs/roleSlot" },
+        "heading1": { "$ref": "#/$defs/roleSlot" },
+        "heading2": { "$ref": "#/$defs/roleSlot" },
+        "heading3": { "$ref": "#/$defs/roleSlot" },
+        "body": { "$ref": "#/$defs/roleSlot" },
+        "caption": { "$ref": "#/$defs/roleSlot" },
+        "list": { "$ref": "#/$defs/roleSlot" },
+        "tableHeader": { "$ref": "#/$defs/roleSlot" },
+        "tableBody": { "$ref": "#/$defs/roleSlot" },
+        "quote": { "$ref": "#/$defs/roleSlot" },
+        "emphasis": { "$ref": "#/$defs/roleSlot" },
+        "headerChrome": { "$ref": "#/$defs/roleSlot" },
+        "footerChrome": { "$ref": "#/$defs/roleSlot" }
+      }
+    },
+    "tableChrome": {
+      "type": "object",
+      "properties": {
+        "present": { "type": "boolean" },
+        "outerWidthMm": { "type": ["number", "null"] },
+        "innerWidthMm": { "type": ["number", "null"] },
+        "lineStyle": { "type": ["string", "null"] },
+        "lineColor": { "type": ["string", "null"] },
+        "headerFill": { "type": ["string", "null"] },
+        "bodyFill": { "type": ["string", "null"] },
+        "usedEngineDefaultBorder": { "type": "boolean" }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "roleSlot": {
+      "type": "object",
+      "required": ["present"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "source": { "enum": ["xml", "visual-estimate", "frequency"] },
+        "ids": {
+          "type": "object",
+          "properties": {
+            "charPrIDRef": { "type": ["string", "null"] },
+            "paraPrIDRef": { "type": ["string", "null"] },
+            "styleIDRef": { "type": ["string", "null"] },
+            "borderFillIDRef": { "type": ["string", "null"] }
+          }
+        },
+        "fontHangul": { "type": ["string", "null"] },
+        "fontLatin": { "type": ["string", "null"] },
+        "sizePt": { "type": ["number", "null"] },
+        "color": { "type": ["string", "null"] },
+        "bold": { "type": ["boolean", "null"] },
+        "italic": { "type": ["boolean", "null"] },
+        "underline": { "type": ["boolean", "null"] },
+        "align": { "enum": ["justify", "left", "center", "right", "unknown", null] },
+        "lineSpacing": {
+          "type": "object",
+          "properties": {
+            "type": { "enum": ["PERCENT", "FIXED", "AT_LEAST", "LINE", "unknown"] },
+            "display": { "type": ["string", "null"], "description": "e.g. 160%" }
+          }
+        },
+        "spaceBeforePt": { "type": ["number", "null"] },
+        "spaceAfterPt": { "type": ["number", "null"] },
+        "indentMm": { "type": ["number", "null"] },
+        "unknownReason": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
