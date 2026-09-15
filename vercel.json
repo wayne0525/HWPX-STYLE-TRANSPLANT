@@ -1,8 +1,0 @@
-{
-  "functions": {
-    "api/transplant/": {
-      "memory": 1024,
-      "maxDuration": 60
-    }
-  }
-}
