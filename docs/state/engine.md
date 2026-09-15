@@ -166,6 +166,39 @@ OK  reference/qualifier/SKILL.md
 - 루트 SKILL.md와 .gitignore만 수정했고, Git 커밋·푸시는 아직 하지 않았다.
 - 이 문서는 설계·상태 정리용이며, 구현이나 성능이 검증됐다고 기록하지 않는다.
 
+## E01/E02 실제 구현 결과
+
+- E01: `hwpx/errors.py`, `hwpx/package.py`, `hwpx/__init__.py`를 추가했다.
+  - DomainError는 code, message, details를 가진다.
+  - read_hwpx(hwp) 진입점은 원본 bytes, ZIP 항목 순서, 각 항목 내용과 메타데이터를 보존하며, 디스크 압축 해제를 하지 않는다.
+  - ZIP_STORED와 DEFLATE만 읽고, mimetype과 필수 XML(Content.hpf + 최소 1개 XML)을 확인한다.
+  - 중복 경로, 경로 탈출, 암호화, CRC 오류, 실제 누적 해제 크기 초과를 차단한다.
+  - 엔트리 5000개, 실제 누적 해제 크기 50000000 bytes 제한을 적용하고, 항목을 나누어 읽으며 한도를 넘는 즉시 중단한다.
+- E02: `hwpx/xml.py`와 `tests/engine/test_xml_runner.py`를 추가하고, `tests/engine/test_xml.py`를 작성했다.
+  - read_xml(payload)은 bytes 또는 ReadResult를 받고, content.hpf 순서로 모든 section을 나열한다.
+  - namespace URI 기준으로 XML을 읽고, 접두자가 달라도 같은 URI면 같은 것으로 본다.
+  - DTD와 외부 엔티티를 거부하고, 원본 bytes와 요소 태그/속성/자식 구조를 보관한다.
+  - 외부 namespace의 같은 이름 태그는 내부 namespace 의미와 섞지 않도록 find_all과 check_ns_mixed로 구분한다.
+  - section 10과 2를 문자열 순서로 오배치하지 않고, content.hpf 등장 순서를 유지한다.
+- 실제 검사 결과:
+  - tests/engine/test_xml_runner.py를 `python -m unittest`로 실행해 10개 테스트가 모두 통과했다.
+  - 정상 ZIP 2종은 열리고, 손상/경로 탈출/실제 해제 크기 초과는 DomainError가 발생했다.
+  - tests/engine/test_xml.py는 pytest가 없어 현재 환경에서는 pytest로 실행하지 못했지만, unittest runner와 동일한 기대값을 담은 파일로서 존재한다.
+
+## 남은 문제
+
+- ElementTree 기반 파싱에서는 sourceline/column이 이번 환경의 파이썬 3.11에서 제공되지 않아, 노드 위치 정보의 일부만 남는다. 원본 bytes와 요소 구조/속성/네임스페이스는 보존되지만, 바이트 위치나 줄/칸 위치의 정밀도는 제한적이다.
+- check_ns_mixed는 검사 결과만 반환하며, 혼입 자체가 자동 차단되는 것은 아니다. 이번 번호는 우선 검사로 남겨두고, 향후 읽기 시점에 차단할지 검토한다.
+- content.hpf의 section href가 ZIP에 실제로 존재하는지, href가 중복되는지 등은 read_xml에서 일부 확인하지만, package 단계와의 경계에서 더 엄격한 검증이 필요할 수 있다.
+- 공통 계약(docs/TEAM_CONTRACT.md)에는 아직 ZIP/XML 읽기 함수의 계약이 없다. 이번 번호의 함수명(read_hwpx, read_xml)과 입출력은 내부 계약으로 사용했으며, 향후 공통 계약에 반영할 수 있다.
+- tests/engine/test_xml.py는 pytest가 없는 현재 환경에서 pytest 수집/실행 결과를 확인하지 못했다. unittest runner로는 동일 기대값이 검증된 상태다.
+- `references/08-output-contract.md`에 HWPX를 못 만들 때 DOCX/PDF를 성공 결과로 대신 제공하는 방향의 표현이 남아 있다.
+- `examples/example-04-docx-fallback.md`도 같은 방향의 예시를 담고 있다.
+- 이번 작업에서는 두 파일을 예선 원본으로 보고 수정하지 않기로 했다.
+- 따라서 루트 SKILL.md의 "HWPX를 목표로 하되 DOCX/PDF를 성공 결과로 대신 제공하지 않는다"는 방향과, `references/08-output-contract.md`의 폴백 방향이 충돌한 채로 남아 있다.
+- 이 충돌은 다음 단계에서 예선 원본 수정 범위를 정하거나, 새 폴백 규칙을 따로 정리할 때 함께 다뤄야 한다.
+- 충돌 처리 전까지는 루트 SKILL.md의 절대 규칙이 우선이라는 점만 문서에 남긴다.
+
 ## 다음 번호
 
 - P02: (미정 — 루트 SKILL.md와 reference/qualifier 예선 원본 사이의 폴백 방향 충돌을 정리한 뒤, 공통 계약과 준비 검사로 넘어감)
