@@ -228,6 +228,15 @@ OK  reference/qualifier/SKILL.md
   - 중첩 표와 여러 section에서 중복이나 순서 뒤바뀜이 없도록 했다.
   - 텍스트 재결합이 원문과 일치하도록 했다.
   - tests/engine/test_source.py는 unittest로 13개 전부 통과했다.
+- E06b: `hwpx/source.py`(SourceBlock 확장, Markdown 제목/표/사실 헬퍼 추가), `tests/engine/test_markdown_source.py`를 추가했다. errors.py와 tables.py는 이번 번호에서 변경하지 않았다.
+  - Markdown 제목 계층과 표의 행과 열을 context/level/table_position 필드에 보존한다.
+  - 굵은 라벨, 슬래시/세미콜론으로 나뉜 라벨 값을 facts로 분리한다.
+  - 이스케이프된 세로줄은 셀 구분자로 세지 않는다.
+  - 표시를 제거한 값과 실제 원문 구간의 대응을 유지한다.
+  - 한 줄에 대표자 김가람과 연락처가 있으면 두 사실로 나눈다.
+  - 정수의 이사 9명과 현원의 이사 7명이 섞이지 않는다.
+  - 제목만으로 만든 문맥을 실제 인용문으로 꾸미지 않는다.
+  - tests/engine/test_markdown_source.py는 unittest로 10개 전부 통과했다.
 
 ## 남은 문제
 
@@ -253,6 +262,8 @@ OK  reference/qualifier/SKILL.md
 - E05b의 시간 범위/재원 분할 regex는 이번에 명시한 패턴만 다루며, 다른 시각 표기나 재원 구분 표현은 별도 규칙이 필요하다.
 - E06 extract_b는 B를 텍스트 블록으로 추출하는 단계이며, 표 문맥(행/열/병합)을 SourceBlock에 연결하는 단계는 아직 별도 처리가 필요하다.
 - E06의 HWPX 텍스트 추출은 XML 태그를 제거하고 텍스트만 남기므로, 실제 HWPX의 문단/표 구조를 보존한 채 추출하려면 추후 구조 보존 추출이 필요하다.
+- E06b의 Markdown 표/사실 분할은 이번에 명시한 패턴만 다루며, 다른 표 형식이나 사실 분리 표현은 별도 규칙이 필요하다.
+- E06b의 SourceBlock 확장은 context/table_position/facts를 추가했으나, 실제 규칙 연결 단계에서 이 필드를 어떻게 사용할지는 아직 별도 계약이 필요하다.
 
 ## 다음 번호
 
