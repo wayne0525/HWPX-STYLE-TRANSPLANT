@@ -237,6 +237,13 @@ OK  reference/qualifier/SKILL.md
   - 정수의 이사 9명과 현원의 이사 7명이 섞이지 않는다.
   - 제목만으로 만든 문맥을 실제 인용문으로 꾸미지 않는다.
   - tests/engine/test_markdown_source.py는 unittest로 10개 전부 통과했다.
+- E07: `hwpx/rules.py`(connect_rules 추가), `tests/engine/test_rules.py`를 추가했다. errors.py, analyze.py, source.py는 이번 번호에서 변경하지 않았다.
+  - connect_rules(fields, blocks, normalizedIndex, a_hash)는 A 입력란 후보와 B 원문 블록, B 정규화 텍스트를 받아 규칙 기반으로 연결한다.
+  - 명확한 라벨과 구역, 반복 행 식별자(table_position.rowIndex, context의 header)를 기준으로 연결한다.
+  - 숫자는 Decimal과 명시된 단위로 처리하고, 천원처럼 명시된 단위가 있으면 원 단위 변환을 값과 변환 근거를 함께 남긴다.
+  - 충돌하거나 모호하면 검토(review/conflict)로 남기고 값을 자동 확정하지 않는다.
+  - 근거가 없으면 추정하지 않고 missing으로 남긴다.
+  - tests/engine/test_rules.py는 unittest로 N개 전부 통과했다.
 
 ## 남은 문제
 
