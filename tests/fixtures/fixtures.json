@@ -1,0 +1,42 @@
+{
+  "files": [
+    {
+      "name": "company_report.hwpx",
+      "bytes_sha256": "f3da97ddff94df25c596804640525152472c3d16c6e4124779c6ba1f03451d81",
+      "bytes_len": 917,
+      "kind": "business"
+    },
+    {
+      "name": "patent_spec.hwpx",
+      "bytes_sha256": "81d81db3ca27cdc1658fb0954d94f5533223d4dc54348e3b079b070d4d4d0ff1",
+      "bytes_len": 930,
+      "kind": "business"
+    },
+    {
+      "name": "event_plan.hwpx",
+      "bytes_sha256": "25fabfb75d87d472e20e05d260cb45582726fe0947e2659f2a273843e8249dc1",
+      "bytes_len": 928,
+      "kind": "business"
+    },
+    {
+      "name": "invoice.hwpx",
+      "bytes_sha256": "abd94e213a6ee871c044af4ebc33674c41cd5f2281e9ca77abdc662d37d295d8",
+      "bytes_len": 931,
+      "kind": "business"
+    },
+    {
+      "name": "meeting_minutes.hwpx",
+      "bytes_sha256": "e4362f861086cae84bad8b535712ce6872e99b007337621a6a9b0fabd13bcad3",
+      "bytes_len": 942,
+      "kind": "business"
+    },
+    {
+      "name": "eval_unused.hwpx",
+      "bytes_sha256": "369149c4274ad44b815a7edafd5aaca9e2edcdf5ecf5c27598bde39bd6069c3a",
+      "bytes_len": 920,
+      "kind": "eval_only"
+    }
+  ],
+  "created_by": "E13",
+  "purpose": "synthetic fixture for evaluation"
+}
