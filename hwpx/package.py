@@ -407,3 +407,15 @@ def _validate_on_read(raw: bytes, path: str) -> None:
         "unexpected validation request",
         {"path": path},
     )
+
+
+def file_hash(path: str) -> str:
+    """파일의 SHA-256 해시를 'sha256:<hexdigest>' 형식으로 반환한다.
+
+    계약: docs/contracts/engine.md §1.2
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return f"sha256:{h.hexdigest()}"
