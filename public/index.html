@@ -102,20 +102,17 @@
   .badge-yes { background: #c6f6d5; color: #22543d; }
   .badge-estimate { background: #fefcbf; color: #744210; }
   .badge-no { background: #fed7d7; color: #742a2a; }
-  .download-row { margin-top: 16px; }
-  .download-row a {
-    display: inline-block;
-    padding: 10px 20px;
-    background: var(--accent);
-    color: #fff;
-    border-radius: 6px;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 14px;
-  }
-  .download-row a:hover { background: var(--accent-hover); }
-  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #bee3f8; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress { margin-top: 12px; }
+  .progress-bar-bg { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+  .progress-bar { height: 100%; background: var(--accent); width: 0%; transition: width 0.2s ease; }
+  .progress-stage { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .progress-pct { font-size: 13px; font-weight: 600; color: var(--text); }
+  .result-line { font-size: 14px; margin-top: 6px; }
+  .result-line .count { font-weight: 600; }
+  .download-row { margin-top: 12px; }
+  #downloadLink { display: none; }
+  #downloadLink.show { display: inline-block; }
+  #status { margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -135,22 +132,15 @@
       <div class="hint">파일과 텍스트 중 하나를 사용하세요 · A와 B 합계 최대 2.5MB</div>
     </div>
     <div class="actions">
-      <button id="runBtn">입력란 분석 및 내용 제안</button>
+      <button id="runBtn">HWPXly💨</button>
       <button id="resetBtn" class="secondary">초기화</button>
     </div>
+    <div id="progress" class="progress" style="display:none">
+      <div class="progress-bar-bg"><div class="progress-bar" id="progressBar"></div></div>
+      <div class="progress-stage" id="progressStage"></div>
+      <div class="progress-pct" id="progressPct"></div>
+    </div>
     <div id="status" role="status" aria-live="polite"></div>
-  </div>
-  <section id="review" class="card" hidden aria-label="입력값 검토">
-    <h2>입력값 검토</h2>
-    <p>내용과 근거를 확인하고 채울 칸을 선택하세요 빈 값과 미선택 칸은 원본 그대로 남습니다</p>
-    <p id="warnings" style="white-space:pre-wrap"></p>
-    <div id="fields"></div>
-    <button id="generateBtn">선택한 내용으로 HWPX 생성</button>
-  </section>
-  <div id="result" class="card">
-    <h2>생성 결과</h2>
-    <p id="resultSummary"></p>
-    <p>글자 배치와 페이지 이동은 실제 한글에서 확인해 주세요</p>
     <div class="download-row"><a id="downloadLink" download>작성본 HWPX 다운로드</a></div>
   </div>
 </div>
