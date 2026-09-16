@@ -6,3 +6,6 @@ dependencies = ["lxml>=6.1,<7"]
 
 [dependency-groups]
 dev = ["pytest"]
+
+[tool.vercel]
+entrypoint = "api.transplant.index:handler"
