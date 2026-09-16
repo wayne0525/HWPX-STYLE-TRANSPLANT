@@ -229,14 +229,30 @@ def _parse_native_hpf(raw: bytes, package: ReadResult) -> _HpfParseResult:
         key, href = item.get("id"), item.get("href", "")
         if not key or key in items or not href or href.startswith(("/", "\\")) or ":" in href or "\\" in href or ".." in href.split("/"):
             raise DomainError(BAD_XML, "Invalid manifest item", {})
-        path = href if href.startswith("Contents/") else posixpath.join("Contents", href)
-        items[key] = path
+        # 한글은 ZIP 루트 경로와 content.hpf 기준 상대 경로를 모두 사용한다
+        path = href if package.has_path(href) or href.startswith("Contents/") else posixpath.join("Contents", href)
+        items[key] = (path, item.get("media-type", ""))
     paths = []
+    seen = set()
     for item in root.findall("opf:spine/opf:itemref", ns):
-        path = items.get(item.get("idref"))
-        if not path or not package.has_path(path) or path in paths:
+        entry = items.get(item.get("idref"))
+        if entry is None:
             raise DomainError(SECTION_ORDER_BAD, "Invalid spine reference", {})
-        paths.append(path)
+        path, media_type = entry
+        if not package.has_path(path) or path in seen:
+            raise DomainError(SECTION_ORDER_BAD, "Invalid spine reference", {"path": path})
+        seen.add(path)
+        # spine의 header와 스크립트는 본문이 아니며 스크립트는 실행하지 않는다
+        if not path.lower().endswith(".xml") and "xml" not in media_type.lower():
+            continue
+        content = package.get_bytes(path)
+        _reject_doctype_and_entities(content)
+        try:
+            section = ET.fromstring(content)
+        except ET.ParseError as exc:
+            raise DomainError(BAD_XML, "Invalid spine XML", {"path": path}) from exc
+        if section.tag == "{http://www.hancom.co.kr/hwpml/2011/section}sec":
+            paths.append(path)
     if not paths:
         raise DomainError(SECTION_ORDER_BAD, "Empty spine", {})
     return _HpfParseResult(paths)
