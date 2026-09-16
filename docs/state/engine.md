@@ -10,7 +10,7 @@
 - 병합 셀 테스트의 skip 제거, 실제 병합 구조와 미선택 문단 보존 검사
 - 실행: `python -X utf8 -m pytest tests -q --tb=short` → **235 passed**, 실패 0, skip 0 (21.29초)
 - `git diff --check` 통과, 아래 기록은 이전 단계의 결과
-- 남은 작업: `api/transplant/index.py`는 아직 `hwpx_lib` 사용, 새 `hwpx` 엔진과 서비스 연결 필요
+- 후속 웹 연결 완료: `api/transplant/index.py` → `web_service.py` → 새 `hwpx` 엔진, 실제 HTTP 및 브라우저 검사 결과는 `docs/state/service.md` 참고
 - Solar 실호출, 배포 환경, 실제 한글/PDF 렌더링은 이번 검사 범위에 포함하지 않음
 
 ## 2026-09-16 실제 HWPX 엔진 전환 검사

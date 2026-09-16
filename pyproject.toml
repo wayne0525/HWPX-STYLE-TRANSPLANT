@@ -1,2 +1,8 @@
-[tool.vercel]
-entrypoint = "api.transplant.index:handler"
+[project]
+name = "hwpx-style-transplant"
+version = "1.1.0"
+requires-python = ">=3.12"
+dependencies = ["lxml>=6.1,<7"]
+
+[dependency-groups]
+dev = ["pytest"]

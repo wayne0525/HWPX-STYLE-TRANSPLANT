@@ -2062,6 +2062,16 @@ A의 복사본에서 선택한 구간만 수정하고 결과를 만든다.
 
 ## 19. 관련 문서
 
+### 2026-09-16 웹 연결 구현 보충
+
+- 공개 경로는 `/api/transplant`, 실제 함수 파일은 `api/transplant/index.py`
+- 서비스 로직은 `web_service.py`에 둔다 API 디렉터리의 보조 파일이 별도 Vercel 함수로 배포되지 않도록 분리한다
+- `analyze` 응답에는 기존 analysis/source 외에 rules 기반 `suggestions`, `ruleResults`, `warnings`가 포함된다 화면은 미제안 필드를 `suggest`로 요청한다
+- 자동 값 생성 시 `generate` 요청에 원본 `b: SourceInput`을 함께 보낸다 서버는 B를 다시 추출하며 클라이언트의 blocks와 fields의 편집 위치는 사용하지 않는다 수동 편집만 있다면 b 생략 가능
+- `result.resultBytes`는 base64 문자열이다 구조 검사 실패 응답에는 result를 넣지 않는다
+- 이번 운영 경로는 status/analyze/suggest/generate다 preview 액션은 미구현이며 INVALID_ACTION을 반환한다 화면의 입력란 위치 정보는 렌더링 미리보기가 아니다
+- 환경 변수는 UPSTAGE_API_KEY를 우선하고 기존 SOLAR_API_KEY를 대체 키 이름으로 지원한다 키가 없거나 Solar 배치가 실패해도 분석 결과를 보존하고 수동 입력을 허용한다
+
 - 루트 `SKILL.md`
 - `PROJECT_BLUEPRINT.md`
 - `docs/WORK_RULES.md`

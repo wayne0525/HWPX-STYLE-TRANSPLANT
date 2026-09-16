@@ -1,5 +1,21 @@
 # 서비스 구성 상태 (확인일: 2026-09-16)
 
+## 최신: 웹 API와 새 엔진 연결
+
+- 운영 흐름: `public/app.js` → `/api/transplant` → `web_service.py` → `hwpx` 공개 분석·추출·규칙·생성·검증 함수
+- 기존 `hwpx_lib` 호출과 임시 파일 기반 재조립 제거, 기존 라이브러리 파일은 보존
+- `analyze`는 규칙 제안까지 반환, 화면은 미제안 입력란을 20개씩 `suggest`로 요청하고 사용자가 검토·선택한 후 `generate` 실행
+- 생성 시 A 재분석과 해시 검사, 자동 값은 요청의 원본 B를 재추출해 검증하며 브라우저의 blocks/편집 위치를 신뢰하지 않음
+- 선택한 수동 값·미선택 영역 보존, 입력 변경 시 이전 분석/다운로드 무효화
+- Solar: `UPSTAGE_API_KEY` 우선, `SOLAR_API_KEY` 호환, `solar-pro4` 기본값, 배치 20칸/48,000바이트, 실패 시 수동 입력 가능
+- 요청/응답 3,800,000바이트, 원본 A+B 및 결과 ZIP 2,500,000바이트 제한
+- 전체 검사: `python -X utf8 -m pytest tests -q --tb=short` → **241 passed**, 실패/skip 없음
+- 잠금 파일 기반 새 가상환경 재검사: `uv run --locked python -X utf8 -m pytest tests -q --tb=short` → **241 passed** (27.81초)
+- 실제 로컬 HTTP 및 Chromium: A.hwpx 업로드 → 제안 → 수동 1칸 선택 → 구조 검증 → A_작성본.hwpx 다운로드 성공, 콘솔 오류 없음, 원문 변경 시 기존 결과 제거 확인
+- Solar 실호출·Vercel 배포 환경·한글 렌더링은 미검증
+- 로컬 실행: `uv run python scripts/dev_server.py --port 5186`
+- 아래 내용은 연결 전 상태 기록
+
 ## 확인된 실제 작업 경로
 
 - 작업 폴더: `/c/MABC/HWPX-STYLE-TRANSPLANT`
