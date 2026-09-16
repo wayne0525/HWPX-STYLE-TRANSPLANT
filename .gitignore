@@ -1,5 +1,14 @@
+# Vercel 배포 산출물
+.vercel
+# 환경 변수 파일
+.env*
+
+# Python 캐시
+__pycache__/
+**/__pycache__/
+
 # API 키는 열지도 않고 삭제하지도 않음. 추적만 제외.
 UPSTAGE_API_KEY.md
 
-# Python 캐시
-**/__pycache__
+# 중략된 바이너리 테스트 산출물은 추적하지 않음
+*.hwpx
