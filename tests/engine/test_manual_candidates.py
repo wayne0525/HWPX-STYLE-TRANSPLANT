@@ -30,11 +30,9 @@ def _hwpx_bytes(section_xml: str) -> bytes:
                     "</Types>")
         z.writestr("Content.hpf",
                     "<?xml version='1.0' encoding='UTF-8'?>"
-                    "<HWPXPackage xmlns='http://www.hwpzone.org/hwpx'>"
-                    "<Content xmlns='http://www.hwpzone.org/hwpx'>"
+                    "<HpF xmlns='http://www.hwpzone.org/hwpx'>"
                     "<section href='section0.xml'/>"
-                    "</Content>"
-                    "</HWPXPackage>")
+                    "</HpF>")
         z.writestr("section0.xml", section_xml)
     return buf.getvalue()
 

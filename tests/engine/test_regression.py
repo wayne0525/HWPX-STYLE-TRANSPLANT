@@ -14,6 +14,7 @@ pytest가 없을 때는 unittest로 실행한다.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import unittest
 import zipfile
@@ -95,10 +96,10 @@ def _section0_merged_table() -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<hp:section xmlns:hp=\"http://www.hwpzone.org/hwpx\">"
+        "<hp:p><hp:t>표 위 문단</hp:t></hp:p>"
         "<hp:tbl>"
         "<hp:tr>"
-        "<hp:tc><hp:t>머리1</hp:t></hp:tc>"
-        "<hp:tc><hp:t>머리2</hp:t></hp:tc>"
+        "<hp:tc gridSpan=\"2\"><hp:t>머리1</hp:t></hp:tc>"
         "<hp:tc><hp:t>머리3</hp:t></hp:tc>"
         "</hp:tr>"
         "<hp:tr>"
@@ -114,9 +115,10 @@ def _section0_merged_table() -> str:
 class TestRegressionWrongAmountDetection(unittest.TestCase):
     def test_wrong_amount_produces_exit_1(self):
         raw = _hwpx_bytes(_section0_simple("원본 금액 1000"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "원본 금액 1000"}
-        edits = [{"fieldId": "f-1", "value": "잘못된 금액 2000", "selected": True, "origin": "manual"}]
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "원본 금액 1000"}
+        edits = [{"fieldId": fid, "value": "잘못된 금액 2000", "selected": True, "origin": "manual"}]
         result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=True)
         self.assertEqual(result["exit_code"], 1, f"잘못된 금액은 품질 실패여야 함: {result}")
         self.assertFalse(result["passed"])
@@ -126,7 +128,7 @@ class TestRegressionWrongAmountDetection(unittest.TestCase):
 class TestRegressionUnselectedFieldPreserved(unittest.TestCase):
     def test_unselected_field_original_text_preserved(self):
         raw = _hwpx_bytes(_section0_two_paragraphs("첫문단", "둘째문단"))
-        a_sha = "sha256:" + raw.hex()[:16]
+        a_sha = hashlib.sha256(raw).hexdigest()
         pkg = read_hwpx(raw)
         xml = read_xml(pkg)
         analysis = analyze_a(xml, a_bytes=raw, a_sha256=a_sha)
@@ -150,11 +152,12 @@ class TestRegressionUnselectedFieldPreserved(unittest.TestCase):
 class TestRegressionMergedCellPreserved(unittest.TestCase):
     def test_merged_table_structure_preserved_after_paragraph_edit(self):
         raw = _hwpx_bytes(_section0_merged_table())
-        a_sha = "sha256:" + raw.hex()[:16]
+        a_sha = hashlib.sha256(raw).hexdigest()
         pkg = read_hwpx(raw)
         xml = read_xml(pkg)
         orig_tables = read_tables(xml)
         self.assertGreater(len(orig_tables.tables), 0, "원본에 표가 있어야 함")
+        self.assertTrue(orig_tables.tables[0].merges, "병합 셀이 있어야 함")
         # 표 문단을 편집(병합 셀은 건드리지 않음)
         edits = [{"fieldId": "f-top", "value": "수정 문단", "selected": True, "origin": "manual"}]
         # analyze_a가 표 위 문단을 필드로 분석하는지 확인
@@ -177,6 +180,8 @@ class TestRegressionMergedCellPreserved(unittest.TestCase):
         for o, n in zip(orig_tables.tables, new_tables.tables):
             self.assertEqual(o.row_count, n.row_count)
             self.assertEqual(o.column_count, n.column_count)
+            self.assertEqual([(m.type, m.start_row, m.start_col, m.spans) for m in o.merges],
+                             [(m.type, m.start_row, m.start_col, m.spans) for m in n.merges])
 
 
 class TestRegressionZipCorruptionDetected(unittest.TestCase):
@@ -188,7 +193,7 @@ class TestRegressionZipCorruptionDetected(unittest.TestCase):
 
     def test_validate_reports_zip_error_on_bad_result(self):
         raw = _hwpx_bytes(_section0_simple("정상"))
-        a_sha = "sha256:" + raw.hex()[:16]
+        a_sha = hashlib.sha256(raw).hexdigest()
         bad_result = b"not a real result"
         v = validate_output(bad_result, raw, [], [], a_sha)
         self.assertFalse(v["passed"])
@@ -206,7 +211,7 @@ class TestRegressionXmlCorruptionDetected(unittest.TestCase):
 
     def test_validate_reports_xml_error_on_bad_section(self):
         raw = _hwpx_bytes("<?xml version=\"1.0\"?><broken")
-        a_sha = "sha256:" + raw.hex()[:16]
+        a_sha = hashlib.sha256(raw).hexdigest()
         v = validate_output(raw, raw, [], [], a_sha)
         self.assertFalse(v["passed"])
         self.assertTrue(any(e.get("type") == "xml-wellformed" for e in v["errors"]))
@@ -215,16 +220,18 @@ class TestRegressionXmlCorruptionDetected(unittest.TestCase):
 class TestRegressionFailureVersusNotVerified(unittest.TestCase):
     def test_human_reviewed_false_with_edits_is_exit_1(self):
         raw = _hwpx_bytes(_section0_simple("원본"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "원본"}
-        edits = [{"fieldId": "f-1", "value": "다른값", "selected": True, "origin": "manual"}]
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "원본"}
+        edits = [{"fieldId": fid, "value": "다른값", "selected": True, "origin": "manual"}]
         result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=False)
         self.assertEqual(result["exit_code"], 1, f"사람 검토 없이 품질 실패면 exit 1: {result}")
 
     def test_no_edits_no_human_review_is_exit_2(self):
         raw = _hwpx_bytes(_section0_simple("원본"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "원본"}
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "원본"}
         result = evaluate_quality(raw, a_sha, None, gold, edits=None, human_reviewed=False)
         self.assertEqual(result["exit_code"], 2, f"편집 없고 사람 검토도 없으면 exit 2: {result}")
         self.assertFalse(result["passed"])

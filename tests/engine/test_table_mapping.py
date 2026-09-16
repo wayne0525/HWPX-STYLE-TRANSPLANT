@@ -99,6 +99,25 @@ def _table_analysis(
 
 
 class TestTableMapping(unittest.TestCase):
+    def test_same_title_multiple_source_tables_not_position_matched(self):
+        fields = [_field("f", "금액", context=["표: 비용"],
+                         location=_location(table={"tableId": "a"}, column={"columnIndex": 0}))]
+        blocks = [_block("b1", "100", context=["표: 비용"],
+                         table_position={"tableId": "b1", "rowIndex": 0, "colIndex": 0}),
+                  _block("b2", "200", context=["표: 비용"],
+                         table_position={"tableId": "b2", "rowIndex": 0, "colIndex": 0})]
+        result = self.connect(fields, blocks, _table_analysis(col_labels=["금액"]))
+        self.assertEqual(result["results"][0]["status"], "missing")
+
+    def test_fixed_row_uses_name_not_source_row_number(self):
+        fields = [_field("f", "재료비", context=["표: 비용"],
+                         location=_location(table={"tableId": "a"}, row={"rowIndex": 0}, column={"columnIndex": 1}))]
+        blocks = [_block("name", "재료비", context=["표: 비용"], table_position={"rowIndex": 4, "colIndex": 0}),
+                  _block("value", "721", context=["표: 비용"], table_position={"rowIndex": 4, "colIndex": 1}),
+                  _block("other", "39", context=["표: 비용"], table_position={"rowIndex": 0, "colIndex": 1})]
+        result = self.connect(fields, blocks, _table_analysis(row_labels=["재료비"], col_labels=["항목", "금액"]))
+        self.assertEqual(result["results"][0]["value"], "721")
+
     def connect(
         self,
         fields,

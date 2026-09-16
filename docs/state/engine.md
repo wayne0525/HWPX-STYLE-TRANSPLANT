@@ -1,5 +1,18 @@
 # docs/state/engine.md — HWPX_TRANSPLANT
 
+## 2026-09-16 통합 후 회귀 실패 수정
+
+- 작업 브랜치: `transplant-merge`, 엔진·서비스·Dylan 엔진 병합본 기준
+- SHA-256 표현을 공개 분석/생성 계약과 동일한 64자리 hex로 통일
+- 표 제목·구역·열 의미·행 이름으로 셀 값을 연결하고 동일 제목의 복수 원문 표는 위치 연결에서 제외
+- 평가 시 결과의 실제 문단/필드 위치를 읽고 오기입을 채움률에서 제외, 보호 영역 변경과 미실행을 실패/미검증으로 반영
+- 이전 경로 기반 테스트를 바이트 기반 공개 계약으로 갱신하고 잘못된 합성 패키지와 해시/필드 ID 수정
+- 병합 셀 테스트의 skip 제거, 실제 병합 구조와 미선택 문단 보존 검사
+- 실행: `python -X utf8 -m pytest tests -q --tb=short` → **235 passed**, 실패 0, skip 0 (21.29초)
+- `git diff --check` 통과, 아래 기록은 이전 단계의 결과
+- 남은 작업: `api/transplant/index.py`는 아직 `hwpx_lib` 사용, 새 `hwpx` 엔진과 서비스 연결 필요
+- Solar 실호출, 배포 환경, 실제 한글/PDF 렌더링은 이번 검사 범위에 포함하지 않음
+
 ## 2026-09-16 실제 HWPX 엔진 전환 검사
 
 - `team/engine-dylan`의 `7f44546` 분석 규칙을 `hwpx/template.py`로 도입하고 위치 기반 생성은 `hwpx/fill.py`에서 수행

@@ -10,6 +10,7 @@ from __future__ import annotations
 import unittest
 
 from hwpx.source import extract_b, BExtractResult, SourceBlock
+from tests.engine.test_gold import _hwpx_bytes
 
 
 class TestExtractB(unittest.TestCase):
@@ -60,7 +61,7 @@ class TestExtractB(unittest.TestCase):
             '</hp:body>'
             '</hp:document>'
         )
-        result = extract_b(xml.encode("utf-8"), kind="hwpx")
+        result = extract_b(_hwpx_bytes(xml), kind="hwpx")
         self.assertEqual(result.kind, "hwpx")
         texts = [b.text for b in result.blocks]
         # 서식 없이 텍스트만 추출
@@ -87,7 +88,7 @@ class TestExtractB(unittest.TestCase):
             '</hp:body>'
             '</hp:document>'
         )
-        result = extract_b(xml.encode("utf-8"), kind="hwpx")
+        result = extract_b(_hwpx_bytes(xml), kind="hwpx")
         texts = [b.text for b in result.blocks if b.text.strip()]
         self.assertEqual(texts, ["섹션1-A", "섹션1-B", "섹션2-A"])
 
@@ -108,7 +109,7 @@ class TestExtractB(unittest.TestCase):
             '</hp:body>'
             '</hp:document>'
         )
-        result = extract_b(xml.encode("utf-8"), kind="hwpx")
+        result = extract_b(_hwpx_bytes(xml), kind="hwpx")
         texts = [b.text for b in result.blocks if b.text.strip()]
         # '안쪽'이 한 번만 나와야 함
         self.assertEqual(texts.count("안쪽"), 1)

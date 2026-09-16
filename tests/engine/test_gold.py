@@ -9,10 +9,14 @@ pytest가 없을 때는 unittest로 실행한다.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import unittest
 import zipfile
+from unittest.mock import patch
 
+from hwpx.analyze import analyze_a
+from hwpx.xml import read_xml
 from hwpx.package import read_hwpx
 from scripts.evaluate import evaluate_quality, _gold_for, _edits_for
 
@@ -51,58 +55,73 @@ def _section0(text: str) -> str:
 class TestGoldEvaluateQualityExitCode(unittest.TestCase):
     def test_missing_field_produces_exit_1(self):
         raw = _hwpx_bytes(_section0("원본 텍스트"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "정답값"}
-        edits = [{"fieldId": "f-1", "value": "다른값", "selected": True, "origin": "manual"}]
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "정답값"}
+        edits = [{"fieldId": fid, "value": "다른값", "selected": True, "origin": "manual"}]
         result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=True)
         self.assertEqual(result["exit_code"], 1, f"오기입은 품질 실패여야 함: {result}")
         self.assertFalse(result["passed"])
 
+    def test_unselected_original_is_not_miswrite(self):
+        raw = _hwpx_bytes(_section0("고정 원문"))
+        digest = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=digest).fields[0]["fieldId"]
+        result = evaluate_quality(raw, digest, None, {fid: None}, edits=[], human_reviewed=True)
+        self.assertTrue(result["passed"], result)
+
     def test_missing_required_field_produces_exit_1(self):
         raw = _hwpx_bytes(_section0("원본 텍스트"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "정답값"}
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "정답값"}
         # value를 비우면 기대 정답이 missing으로 처리되어 품질 실패
-        edits = [{"fieldId": "f-1", "value": "", "selected": True, "origin": "manual"}]
+        edits = [{"fieldId": fid, "value": "", "selected": True, "origin": "manual"}]
         result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=True)
         self.assertEqual(result["exit_code"], 1, f"정답 미기입은 품질 실패여야 함: {result}")
         self.assertFalse(result["passed"])
 
     def test_exact_match_produces_exit_0(self):
         raw = _hwpx_bytes(_section0("원본 텍스트"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "정답값"}
-        edits = [{"fieldId": "f-1", "value": "정답값", "selected": True, "origin": "manual"}]
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "정답값"}
+        edits = [{"fieldId": fid, "value": "정답값", "selected": True, "origin": "manual"}]
         result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=True)
         self.assertEqual(result["exit_code"], 0, f"정답 일치 시 통과여야 함: {result}")
         self.assertTrue(result["passed"])
 
     def test_no_human_review_reports_not_verified(self):
         raw = _hwpx_bytes(_section0("원본 텍스트"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "정답값"}
-        edits = [{"fieldId": "f-1", "value": "정답값", "selected": True, "origin": "manual"}]
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "정답값"}
+        edits = [{"fieldId": fid, "value": "정답값", "selected": True, "origin": "manual"}]
         result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=False)
         self.assertIn("사람 검토가 없어", " ".join(result["notes"]))
         self.assertFalse(result["human_reviewed"])
 
     def test_no_edits_reports_not_verified_and_exit_2(self):
         raw = _hwpx_bytes(_section0("원본 텍스트"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "정답값"}
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "정답값"}
         result = evaluate_quality(raw, a_sha, None, gold, edits=None, human_reviewed=False)
         self.assertEqual(result["exit_code"], 2, f"편집 없이 사람 검토도 없으면 자료 미검증(2)여야 함: {result}")
         self.assertFalse(result["passed"])
 
     def test_protected_structure_change_produces_exit_1(self):
-        raw = _hwpx_bytes(_section0("원본 텍스트"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "정답값"}
-        edits = [{"fieldId": "f-1", "value": "정답값", "selected": True, "origin": "manual"}]
-        # 이 테스트 환경에서는 보호 구조 변경까지 재현하지 않으므로,
-        # evaluate_quality가 구조로 인한 실패를 숨기지 않는다는 점만 확인한다.
-        result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=True)
-        self.assertIn("protected_changed", result["metrics"])
+        section = _section0("원본 텍스트").replace("</hp:section>", "<hp:p><hp:t>유지할 문단</hp:t></hp:p></hp:section>")
+        raw = _hwpx_bytes(section)
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "정답값"}
+        edits = [{"fieldId": fid, "value": "정답값", "selected": True, "origin": "manual"}]
+        damaged = _hwpx_bytes(section.replace("원본 텍스트", "정답값").replace("유지할 문단", "변조된 문단"))
+        with patch("scripts.evaluate.generate_result", return_value={"resultBytes": damaged, "errors": []}):
+            result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=True)
+        self.assertEqual(result["exit_code"], 1)
+        self.assertTrue(result["metrics"]["protected_changed"], result)
 
 
 class TestGoldFixtureAnswers(unittest.TestCase):
@@ -119,9 +138,10 @@ class TestGoldFixtureAnswers(unittest.TestCase):
 class TestGoldQualityMetrics(unittest.TestCase):
     def test_fill_rate_uses_denominator_including_undetected(self):
         raw = _hwpx_bytes(_section0("원본 텍스트"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "정답값", "f-2": "다른정답"}
-        edits = [{"fieldId": "f-1", "value": "정답값", "selected": True, "origin": "manual"}]
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "정답값", "f-2": "다른정답"}
+        edits = [{"fieldId": fid, "value": "정답값", "selected": True, "origin": "manual"}]
         result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=True)
         metrics = result["metrics"]
         self.assertIn("fill_rate", metrics)
@@ -130,11 +150,13 @@ class TestGoldQualityMetrics(unittest.TestCase):
 
     def test_miswrite_count_reported(self):
         raw = _hwpx_bytes(_section0("원본 텍스트"))
-        a_sha = "sha256:" + raw.hex()[:16]
-        gold = {"f-1": "정답값"}
-        edits = [{"fieldId": "f-1", "value": "오답값", "selected": True, "origin": "manual"}]
+        a_sha = hashlib.sha256(raw).hexdigest()
+        fid = analyze_a(read_xml(raw), a_bytes=raw, a_sha256=a_sha).fields[0]["fieldId"]
+        gold = {fid: "정답값"}
+        edits = [{"fieldId": fid, "value": "오답값", "selected": True, "origin": "manual"}]
         result = evaluate_quality(raw, a_sha, None, gold, edits=edits, human_reviewed=True)
         self.assertGreater(result["metrics"]["miswrite_count"], 0)
+        self.assertEqual(result["metrics"]["fill_rate"], 0.0)
 
 
 if __name__ == "__main__":

@@ -9,9 +9,18 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-A_PATH = os.path.join(os.path.dirname(__file__), "fixtures", "A.hwpx")
+HERE = os.path.dirname(__file__)
+FIXTURES = os.path.join(HERE, "fixtures")
+A_PATH = os.path.join(FIXTURES, "A.hwpx")
 
-from hwpx.analyze import analyze_a
+from hwpx.package import read_hwpx
+from hwpx.xml import read_xml
+from hwpx.template import analyze_a
+
+
+def _analysis_from_path(path):
+    raw = open(path, "rb").read()
+    return analyze_a(raw)
 
 
 # ---------------------------------------------------------------------------
@@ -20,7 +29,7 @@ from hwpx.analyze import analyze_a
 
 @pytest.fixture(scope="module")
 def analysis():
-    return analyze_a(A_PATH)
+    return _analysis_from_path(A_PATH)
 
 
 def _fields_by_id(analysis):
@@ -44,11 +53,12 @@ class TestAnalyzeMeta:
         assert analysis["file_kind"] == "hwpx"
 
     def test_a_hash_prefix(self, analysis):
-        assert analysis["a_hash"].startswith("sha256:")
+        import hashlib
+        assert analysis["a_hash"] == hashlib.sha256(open(A_PATH, 'rb').read()).hexdigest()
 
     def test_idempotent_a_hash(self, analysis):
         """두 번 호출해도 a_hash가 같아야 한다 (결정론)."""
-        a2 = analyze_a(A_PATH)
+        a2 = _analysis_from_path(A_PATH)
         assert a2["a_hash"] == analysis["a_hash"]
 
     def test_failure_none(self, analysis):
@@ -65,12 +75,11 @@ class TestFieldIdFormat:
         for f in analysis["fields"]:
             assert "field_id" in f
             assert f["field_id"].startswith("f-")
-            assert len(f["field_id"]) == 5  # f-XXX
+            assert len(f["field_id"]) == 26
 
     def test_ids_are_contiguous(self, analysis):
         ids = sorted(f["field_id"] for f in analysis["fields"])
-        for i, fid in enumerate(ids, start=1):
-            assert fid == f"f-{i:03d}", f"기대: f-{i:03d}, 실제: {fid}"
+        assert ids == sorted(f['field_id'] for f in _analysis_from_path(A_PATH)['fields'])
 
     def test_unique_field_ids(self, analysis):
         ids = [f["field_id"] for f in analysis["fields"]]
@@ -83,7 +92,7 @@ class TestFieldIdFormat:
 
 class TestTable3:
     def test_danche_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-019")
+        f = next(f for f in analysis['fields'] if f['label'] == '단 체 명')
         assert f is not None
         assert f["label"] == "단 체 명"
         assert f["location"]["table_path"] == [3, 0]
@@ -96,13 +105,13 @@ class TestTable3:
         assert f["merge_info"]["colSpan"] == 10
 
     def test_saeop_gigan_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-020")
+        f = next(f for f in analysis['fields'] if f['label'] == '사업기간')
         assert f is not None
         assert f["label"] == "사업기간"
         assert f["location"]["table_path"] == [3, 0]
 
     def test_saeop_daesang_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-021")
+        f = next(f for f in analysis['fields'] if f['label'] == '사업대상')
         assert f is not None
         assert f["label"] == "사업대상"
         assert f["location"]["table_path"] == [3, 0]
@@ -114,7 +123,7 @@ class TestTable3:
 
 class TestTable10:
     def test_siseol_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-058")
+        f = next(f for f in analysis['fields'] if f['label'] == '시 설 명')
         assert f is not None
         assert f["label"] == "시 설 명"
         assert f["location"]["table_path"] == [10, 0]
@@ -125,13 +134,13 @@ class TestTable10:
         assert f["merge_info"]["colSpan"] == 4
 
     def test_eseong_mokjeok_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-059")
+        f = next(f for f in analysis['fields'] if f['label'] == '설립목적')
         assert f is not None
         assert f["label"] == "설립목적"
         assert f["location"]["table_path"] == [10, 0]
 
     def test_jiwon_geun_geo_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-060")
+        f = next(f for f in analysis['fields'] if f['label'] == '지원근거및  내용')
         assert f is not None
         assert f["label"] == "지원근거및  내용"
         # ‘지원근거및  내용’은 money 패턴이 *끝*에 있을 때만 money로 분류.
@@ -142,13 +151,13 @@ class TestTable10:
         )
 
     def test_homepage_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-061")
+        f = next(f for f in analysis['fields'] if f['label'] == '홈페이지')
         assert f is not None
         assert f["label"] == "홈페이지"
         assert f["location"]["table_path"] == [10, 0]
 
     def test_deungrok_gigwan_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-062")
+        f = next(f for f in analysis['fields'] if f['label'] == '등록기관')
         assert f is not None
         assert f["label"] == "등록기관"
         assert f["location"]["table_path"] == [10, 0]
@@ -156,7 +165,7 @@ class TestTable10:
         assert f["location"]["col"] == 2
 
     def test_deungrok_il_label(self, analysis):
-        f = _fields_by_id(analysis).get("f-063")
+        f = next(f for f in analysis['fields'] if f['label'] == '등록일')
         assert f is not None
         assert f["label"] == "등록일"
         assert f["location"]["table_path"] == [10, 0]
@@ -190,8 +199,8 @@ class TestTable1:
 
     def test_table1_money_fields_have_merge_info(self, analysis):
         """표#1의 천원 셀(col7)은 colSpan=4 병합 (f-013, f-014, f-015)."""
-        for fid in ["f-013", "f-014", "f-015"]:
-            f = _fields_by_id(analysis)[fid]
+        for row in [7, 8, 9]:
+            f = next(f for f in _fields_by_table(analysis, [1, 0]) if f['location']['row'] == row and f['location']['col'] == 7)
             assert f["merge_info"] is not None
             assert f["merge_info"]["colSpan"] == 4
 

@@ -157,6 +157,11 @@ def _match_field(
     field_title = _table_title(field.get("context", []))
     field_section = _section(field.get("context", []))
 
+    scoped_blocks = [b for b in blocks
+                     if (field_title is None or _table_title(b.context) == field_title)
+                     and (field_section is None or _section(b.context) == field_section)]
+    source_tables = {b.table_position.get("tableId") for b in scoped_blocks if b.table_position}
+
     matched: list[tuple[Any, str, str]] = []
     for b in blocks:
         if field_title is not None or field_section is not None:
@@ -168,6 +173,29 @@ def _match_field(
                 continue
 
         text = normalizedIndex.get(b.blockId) if (normalizedIndex and b.blockId in normalizedIndex) else b.text
+
+        # 셀 값은 라벨:값 문장이 아니므로 표의 열 의미와 행을 함께 확인한다
+        if table_idx is not None and (field_title or field_section) and b.table_position and len(source_tables) == 1:
+            ta = table_maps[table_idx]
+            source_col = b.table_position.get("colIndex")
+            source_row = b.table_position.get("rowIndex")
+            if isinstance(source_col, int) and 0 <= source_col < len(ta.col_labels):
+                column_matches = _label_matches_column_meaning(label, ta.col_labels[source_col] or "")
+                fixed_row = label if any(_norm_label(r) == norm_label for r in ta.row_labels if r) else None
+                if fixed_row:
+                    row_matches = any(
+                        other.table_position.get("rowIndex") == source_row
+                        and other.context == b.context
+                        and other.table_position.get("tableId") == b.table_position.get("tableId")
+                        and _norm_label(other.text) == norm_label
+                        for other in blocks
+                    )
+                    column_matches = source_col == col_index
+                else:
+                    row_matches = row_index is None or source_row == row_index
+                if column_matches and row_matches and text.strip():
+                    matched.append((b, b.text, text))
+                    continue
 
         col_match = False
         row_match = False

@@ -13,39 +13,35 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from typing import Any
 
 from hwpx.analyze import analyze_a
 from hwpx.generate import generate_result
-from hwpx.package import ReadResult, read_hwpx
+from hwpx.package import read_hwpx
+from hwpx.errors import DomainError
 from hwpx.validate import validate_output
 from hwpx.xml import read_xml
 
 
-_TAG_RE_EVAL = re.compile(r'<hp:t(\s[^>]*)?>(?P<text>.*?)</hp:t>', re.S)
+def _legacy_field_value(original, result, field):
+    """합성 문서는 원본에서 유일한 문단의 위치를 찾아 같은 결과 문단을 읽는다"""
+    from xml.etree import ElementTree as ET
 
-
-def _first_xml_name(pkg):
-    for name in pkg.item_paths:
-        if name.lower().endswith('.xml'):
-            return name
-    return None
-
-
-def _escape_text(s: str) -> str:
-    s = s.replace('&', '&amp;')
-    s = s.replace('<', '&lt;')
-    s = s.replace('>', '&gt;')
-    return s
-
-
-def _find_t_with_text(xml_text: str, target_text: str):
-    for m in _TAG_RE_EVAL.finditer(xml_text):
-        if m.group('text') == target_text:
-            return m
-    return None
+    matches = []
+    ns = "{http://www.hwpzone.org/hwpx}"
+    for section in original.sections:
+        paragraphs = list(ET.fromstring(section.bytes).iter(ns + "p"))
+        for index, paragraph in enumerate(paragraphs):
+            text = "".join(t.text or "" for t in paragraph.iter(ns + "t"))
+            if text == field.get("originalText"):
+                matches.append((section.path, index))
+    if len(matches) != 1:
+        raise ValueError("필드 위치가 없거나 중복됨")
+    path, index = matches[0]
+    section = next(s for s in result.sections if s.path == path)
+    paragraph = list(ET.fromstring(section.bytes).iter(ns + "p"))[index]
+    return "".join(t.text or "" for t in paragraph.iter(ns + "t"))
 
 
 def evaluate_quality(
@@ -75,7 +71,6 @@ def evaluate_quality(
     form_results: list[dict[str, Any]] = []
 
     pkg = read_hwpx(a_bytes)
-    section_name = _first_xml_name(pkg)
     xml_result = read_xml(pkg)
     analysis = analyze_a(
         xml_result,
@@ -96,7 +91,6 @@ def evaluate_quality(
 
     # 생성 결과 준비
     result_bytes = a_bytes
-    result_fields = fields
     protected_changed = False
     validation_passed = False
     if edits is not None:
@@ -122,8 +116,10 @@ def evaluate_quality(
         for check in v.get("checks", []):
             if check.get("name") == "protected-preserved" and check.get("status") != "passed":
                 protected_changed = True
-        # 적용값 재추출: 여기선 간단히 필드가 결과에 남아있는지만 본다
-        result_fields = v.get("report", {}).get("appliedFieldIds", [])
+        protected_changed = protected_changed or any(
+            e.get("type") in {"protected-changed", "fixed-text-changed", "table-structure-changed", "output-validation"}
+            for e in v.get("errors", [])
+        )
     else:
         notes.append("편집이 없어 생성 결과를 만들지 않음; 정답 평가는 미실행")
 
@@ -131,46 +127,36 @@ def evaluate_quality(
     missing: list[str] = []
     miswrite: list[dict[str, Any]] = []
     if edits is not None:
-        new_pkg = read_hwpx(result_bytes)
-        new_section_name = _first_xml_name(new_pkg)
-        new_section_text = new_pkg.get_bytes(new_section_name).decode("utf-8")
+        try:
+            result_xml = read_xml(result_bytes)
+        except DomainError:
+            result_xml = None
         for field_id, expected in gold_answers.items():
-            if pkg.has_path('Contents/content.hpf'):
-                from hwpx.fill import read_field_value
-                try:
+            try:
+                if result_xml is None:
+                    raise ValueError("결과 문서 파싱 실패")
+                if pkg.has_path("Contents/content.hpf"):
+                    from hwpx.fill import read_field_value
                     actual = read_field_value(a_bytes, result_bytes, field_id, edits)
-                except ValueError:
-                    missing.append(field_id)
-                    continue
-                if expected is None:
-                    if actual:
-                        miswrite.append({'fieldId': field_id, 'expected': None, 'actual': actual})
-                elif not actual:
-                    missing.append(field_id)
-                elif actual != expected:
-                    miswrite.append({'fieldId': field_id, 'expected': expected, 'actual': actual})
-                continue
-            field = next((f for f in fields if f.get("fieldId") == field_id), None)
-            original_text = field.get("originalText", "") if field else ""
-            if expected is None:
-                if original_text and original_text in new_section_text:
-                    miswrite.append({"fieldId": field_id, "expected": None, "actual": "원문 유지"})
-                continue
-            escaped_expected = _escape_text(expected)
-            t_match = _find_t_with_text(new_section_text, original_text)
-            if t_match is None:
-                if escaped_expected in new_section_text:
-                    continue  # 원문 사라지고 새 값 있음
-                missing.append(field_id)
-            else:
-                if t_match.group("text") == escaped_expected:
-                    continue  # 정상 치환
-                if escaped_expected in new_section_text:
-                    miswrite.append({"fieldId": field_id, "expected": expected, "actual": "원문 유지/중복"})
                 else:
-                    missing.append(field_id)
+                    field = next(f for f in fields if f.get("fieldId") == field_id)
+                    actual = _legacy_field_value(xml_result, result_xml, field)
+            except (ValueError, StopIteration, IndexError):
+                missing.append(field_id)
+                continue
+            if expected is None:
+                field = next((f for f in fields if f.get("fieldId") == field_id), {})
+                baseline = read_field_value(a_bytes, a_bytes, field_id, []) if pkg.has_path("Contents/content.hpf") else field.get("originalText", "")
+                if actual != baseline:
+                    miswrite.append({"fieldId": field_id, "expected": None, "actual": actual})
+            elif not actual:
+                missing.append(field_id)
+            elif actual != expected:
+                miswrite.append({"fieldId": field_id, "expected": expected, "actual": actual})
+    else:
+        missing = list(gold_ids)
 
-    filled_count = len(gold_ids) - len(missing)
+    filled_count = len(gold_ids) - len(missing) - len(miswrite)
     denominator = len(gold_ids)
     fill_rate = filled_count / denominator if denominator else 0.0
 
