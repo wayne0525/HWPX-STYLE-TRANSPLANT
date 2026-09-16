@@ -110,7 +110,19 @@
   .result-line { font-size: 14px; margin-top: 6px; }
   .result-line .count { font-weight: 600; }
   .download-row { margin-top: 12px; }
-  #downloadLink { display: none; }
+  #downloadLink {
+    display: none;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+  }
+  #downloadLink:hover { background: var(--accent-hover); }
   #downloadLink.show { display: inline-block; }
   #status { margin-top: 12px; }
 </style>
