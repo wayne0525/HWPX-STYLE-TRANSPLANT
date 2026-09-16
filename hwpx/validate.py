@@ -26,6 +26,13 @@ def validate_output(
     Returns:
         dict: passed, checks, warnings, errors, report.
     """
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(original_bytes)) as archive:
+        native = 'Contents/content.hpf' in archive.namelist()
+    if native:
+        from hwpx.fill import validate_native
+        return validate_native(result_bytes, original_bytes, a_hash, edits)
     checks: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []

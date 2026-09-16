@@ -5,20 +5,30 @@
 이번 번호의 입출력은 내부 계약으로 사용한다.
 
 설계
-- 원문 순서와 표 문맥을 보존한다.
-- B의 서식(글꼴, 스타일 ID, XML, 이미지, 페이지 나누기)은 가져오지 않는다.
-- 긴 블록은 원문 위치가 유지되는 하위 블록으로 나눈다.
-- 중첩 표와 여러 section에서 중복이나 순서 뒤바뀜이 없도록 한다.
-- 텍스트 재결합이 원문과 일치해야 한다.
+- HWPX 바이트는 안전한 ZIP 읽기를 거쳐 문서 순서대로 모든 section을 읽는다.
+- 문단과 표 셀의 원문, 순서, 행과 열 문맥을 보존한다.
+- 중첩 표의 텍스트를 중복 추출하지 않는다.
+- B의 글꼴과 서식은 가져오지 않는다.
+- 해시는 입력 원본 바이트로 계산하고, 긴 블록은 계약대로 나눠 정확히 재결합되게 한다.
+- content.hpf와 HpF 구조만 정답이라고 가정하지 않고, 실제 패키지 경로를 따른다.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import re
+import zipfile
 from typing import Any
 
 from hwpx.errors import DomainError
+from hwpx.package import read_hwpx
+from hwpx.xml import read_xml, XmlReadResult
+from hwpx.tables import read_section_tables
+
+# ------------------------------------------------------------------
+# 공용 진입점
+# ------------------------------------------------------------------
 
 
 def extract_b(
@@ -36,70 +46,79 @@ def extract_b(
 
     Returns:
         BExtractResult: 원문 블록 목록과 메타데이터.
+
+    HWPX 바이트는 안전한 ZIP 읽기를 거쳐 문서 순서대로 모든 section을 읽는다.
     """
     if payload is None:
         raise DomainError("invalid-input", "payload must not be None", {})
-    if isinstance(payload, bytes):
-        text, resolved_kind = _decode_bytes(payload)
-    elif isinstance(payload, str):
-        text = payload
+
+    if isinstance(payload, str):
+        raw_for_hash = payload.encode("utf-8")
         resolved_kind = _resolve_kind(kind, "txt")
-    else:
-        raise DomainError(
-            "invalid-input",
-            "payload must be bytes or str",
-            {"received_type": type(payload).__name__},
-        )
+        blocks = _extract_text_kind(payload, resolved_kind)
+        return _make_result(raw_for_hash, resolved_kind, blocks, b_hash)
 
-    if not isinstance(text, str):
-        raise DomainError(
-            "invalid-input",
-            "decoded payload must be str",
-            {"received_type": type(text).__name__},
-        )
+    # bytes
+    raw_for_hash = payload
+    resolved_kind, blocks = _process_bytes(payload, kind)
+    return _make_result(raw_for_hash, resolved_kind, blocks, b_hash)
 
-    kind = _resolve_kind(kind, resolved_kind)
+
+def _make_result(
+    raw_for_hash: bytes,
+    kind: str,
+    blocks: list[SourceBlock],
+    b_hash: str | None,
+) -> BExtractResult:
     if b_hash is None:
-        b_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-    if not text.strip():
+        b_hash = hashlib.sha256(raw_for_hash).hexdigest()
+    if not raw_for_hash:
+        blocks = []
+    for index, block in enumerate(blocks):
+        block.blockId = 'b-' + hashlib.sha256((b_hash + ':' + str(index)).encode()).hexdigest()[:24]
+    if not blocks:
         return BExtractResult(
             b_hash=b_hash,
             kind=kind,
             analysis_status="partial",
-            warnings=_extract_warnings([]),
+            warnings=["no blocks extracted"],
             blocks=[],
         )
-
-    blocks = _extract_blocks(text, kind)
+    warns = _extract_warnings(blocks)
     return BExtractResult(
         b_hash=b_hash,
         kind=kind,
         analysis_status="partial",
-        warnings=_extract_warnings(blocks),
+        warnings=warns,
         blocks=blocks,
     )
 
 
-def _decode_bytes(raw: bytes) -> tuple[str, str]:
-    """bytes를 UTF-8로 decode하고 종류를 반환한다."""
-    try:
-        text = raw.decode("utf-8")
-        return text, "txt"
-    except UnicodeDecodeError:
-        raise DomainError(
-            "invalid-input",
-            "B payload is not valid UTF-8",
-            {},
-        )
-
-
-def _resolve_kind(kind: str | None, fallback: str) -> str:
-    if kind is None:
-        return fallback
-    low = kind.lower()
-    if low in ("hwpx", "txt", "md"):
-        return low
+def _process_bytes(payload: bytes, kind: str | None) -> tuple[str, list[SourceBlock]]:
+    """bytes를 안전한 ZIP 읽기로 처리하고, HWPX면 문서 순서 텍스트를 추출한다."""
+    resolved = _resolve_kind(kind, None)
+    if resolved == "hwpx" or resolved is None:
+        return _process_hwpx_bytes(payload)
+    if resolved == "txt":
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DomainError(
+                "invalid-input",
+                "B payload is not valid UTF-8",
+                {"received_type": "bytes"},
+            ) from exc
+        return "txt", _extract_text_kind(text, "txt")
+    if resolved == "md":
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DomainError(
+                "invalid-input",
+                "B payload is not valid UTF-8",
+                {"received_type": "bytes"},
+            ) from exc
+        return "md", _extract_text_kind(text, "md")
     raise DomainError(
         "invalid-input",
         f"kind must be hwpx/txt/md, got {kind!r}",
@@ -107,113 +126,332 @@ def _resolve_kind(kind: str | None, fallback: str) -> str:
     )
 
 
-def _extract_blocks(text: str, kind: str) -> list[SourceBlock]:
-    """텍스트를 SourceBlock 목록으로 나눈다.
+def _process_hwpx_bytes(payload: bytes) -> tuple[str, list[SourceBlock]]:
+    """HWPX 바이트를 안전한 ZIP 읽기로 열고, 문서 순서 텍스트를 추출한다.
 
-    kind가 hwpx이면 XML 구조는 무시하고 텍스트만 추출한다(이번 번호는 서식 미가져오기).
-    txt/md는 문단/줄 단위로 나눈다.
+    mimetype이 유효하지 않거나 ZIP 구조가 안전 제약을 위반하면 DomainError를 낸다.
     """
-    if kind == "hwpx":
-        return _extract_hwpx_blocks(text)
+    try:
+        result = read_hwpx(payload)
+    except DomainError:
+        raise
+    except zipfile.BadZipFile as exc:
+        raise DomainError(
+            "invalid-hwpx",
+            "bad zip structure",
+            {"reason": str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise DomainError(
+            "invalid-hwpx",
+            "cannot read HWPX bytes",
+            {"reason": str(exc)},
+        ) from exc
+
+    try:
+        xml_result = read_xml(result)
+    except DomainError:
+        raise
+    except Exception as exc:
+        raise DomainError(
+            "bad-xml",
+            "cannot parse HWPX XML",
+            {"reason": str(exc)},
+        ) from exc
+
+    return "hwpx", _hwpx_document_blocks(xml_result, payload)
+
+
+# ------------------------------------------------------------------
+# 텍스트 종류별 추출 (TXT / MD)
+# ------------------------------------------------------------------
+
+
+def _extract_text_kind(text: str, kind: str) -> list[SourceBlock]:
     if kind == "md":
         return _extract_md_blocks(text)
     return _extract_txt_blocks(text)
 
 
-def _extract_hwpx_blocks(text: str) -> list[SourceBlock]:
-    """HWPX XML 텍스트에서 텍스트만 추출해 블록으로 만든다.
+# ------------------------------------------------------------------
+# HWPX 문서 순서 블록 추출
+# ------------------------------------------------------------------
 
-    이번 번호는 서식을 가져오지 않으므로, XML 태그를 제거하고
-    텍스트 노드를 순서대로 추출한다.
+
+def _hwpx_document_blocks(xml_result: XmlReadResult, raw_bytes: bytes) -> list[SourceBlock]:
+    """content.hpf 순서로 모든 section을 읽고 문서 순서대로 블록을 만든다.
+
+    - section마다 XML 트리를 순회하며 문단 텍스트와 표 셀 텍스트를 문서 순서로 추출한다.
+    - 중첩 표 텍스트는 중복 집계하지 않는다.
+    - 표 셀의 행/열 위치를 SourceBlock에 문맥으로 남긴다.
+    - XML 태그는 제거하지 않고, 실제 텍스트 노드만 수집한다.
     """
-    # XML 태그, 선언, 처리 명령을 제거
-    clean = re.sub(r"<[^>]+>", "\n", text)
-    clean = re.sub(r"<\?xml.*?\?>", "\n", clean, flags=re.S)
-    clean = re.sub(r"<!--.*?-->", "\n", clean, flags=re.S)
-    lines = _split_lines(clean)
+    if any(b'http://www.hancom.co.kr/hwpml/2011/paragraph' in s.bytes for s in xml_result.sections):
+        return _native_document_blocks(xml_result)
     blocks: list[SourceBlock] = []
-    offset = 0
-    for line in lines:
-        block = SourceBlock(
-            blockId=_block_id(blocks, "b"),
-            level=0,
-            text=line,
-            kind="hwpx-text",
-            start=offset,
-            end=offset + len(line),
-            children=[],
-        )
-        blocks.append(block)
-        offset += len(line) + 1
+    block_counter = 0
+
+    for section in xml_result.sections:
+        section_path = section.path
+        section_blocks = _section_blocks(section, section_path)
+        for sb in section_blocks:
+            sb.blockId = _block_id_fmt(block_counter, "b")
+            block_counter += 1
+            blocks.append(sb)
+
     return blocks
 
 
-def _extract_md_blocks(text: str) -> list[SourceBlock]:
-    """Markdown을 줄 단위 블록으로 나눈다.
+def _native_document_blocks(document):
+    from hwpx.template import NS, parse_xml
+    out, offset = [], 0
+    for section in document.sections:
+        root = parse_xml(section.bytes)
+        tables = root.findall('.//hp:tbl', NS)
+        for p in root.iter('{' + NS['hp'] + '}p'):
+            text = ''.join(''.join(t.itertext()) for run in p.findall('hp:run', NS) for t in run.findall('hp:t', NS))
+            if not text.strip():
+                continue
+            position, context, table_context = {}, [section.path], {}
+            cell = next((x for x in p.iterancestors() if x.tag == '{'+NS['hp']+'}tc'), None)
+            if cell is not None:
+                table = next((x for x in cell.iterancestors() if x.tag == '{'+NS['hp']+'}tbl'), None)
+                addr = cell.find('hp:cellAddr', NS)
+                span = cell.find('hp:cellSpan', NS)
+                if table is not None and addr is not None:
+                    table_id = section.path + ':table-' + str(tables.index(table))
+                    position = {'rowIndex': int(addr.get('rowAddr')), 'colIndex': int(addr.get('colAddr')),
+                                'tableId': table_id, 'rowSpan': int(span.get('rowSpan', '1')) if span is not None else 1,
+                                'colSpan': int(span.get('colSpan', '1')) if span is not None else 1}
+                    table_context = {'tableId': table_id}
+                    context.append('표: ' + table_id)
+            out.append(SourceBlock(blockId='', level=0, text=text, kind='hwpx-text', start=offset,
+                                   end=offset+len(text), context=context, table_context=table_context,
+                                   table_position=position))
+            offset += len(text) + 1
+    return out
 
-    이번 번호는 제목 계층과 표 문맥, 복합 라벨을 보존한다.
-    서식은 가져오지 않는다.
+
+def _section_blocks(section: Any, section_path: str) -> list[SourceBlock]:
+    """한 section 트리를 순회하며 문단/표 블록을 문서 순서로 수집한다."""
+    out: list[SourceBlock] = []
+    root = section.tree.root
+    _walk_node(root, section_path, out)
+    return out
+
+
+def _walk_node(node: Any, section_path: str, out: list[SourceBlock], table_ctx: dict[str, Any] | None = None) -> None:
+    """재귀적으로 트리를 순회하며 텍스트와 표 문맥을 수집한다.
+
+    table_ctx가 전달되는 경우 중첩 표 안에서 부모 표 문맥을 그대로 전달하지 않고,
+    중첩 표의 별도 문맥을 구성하도록 분리한다.
     """
-    lines = _split_lines(text)
-    blocks: list[SourceBlock] = []
-    offset = 0
-    md_level = 0
-    table_position: dict[str, Any] = {}
-    for line in lines:
-        line_level = _md_level(line)
-        if line_level is not None:
-            md_level = line_level
-        is_table_line = _looks_like_md_table_row(line)
-        context = _md_context(line, md_level, table_position)
-        facts = _split_facts(line)
-        block = SourceBlock(
-            blockId=_block_id(blocks, "b"),
-            level=0,
-            md_level=line_level,
-            text=line,
-            kind="md-text",
-            start=offset,
-            end=offset + len(line),
-            children=[],
-            context=context,
-            table_position=table_position if is_table_line else {},
-            facts=facts,
+    tag_local = getattr(node, "local", None)
+    tag_ns = getattr(node, "ns_uri", None)
+
+    # 표 시작
+    if _is_table(node):
+        table_id = _table_id_for(node, section_path)
+        table_ctx = _new_table_context(table_id)
+        # 표의 자식(행)을 순회
+        for child in _children(node):
+            _walk_node(child, section_path, out, table_ctx=table_ctx)
+        # 표 블록 자체는 문서 끝에서 닫기 용도로 별도로 추가하지 않고,
+        # 이미 셀/문단 블록에 문맥이 반영된다.
+        return
+
+    # 표 셀
+    if _is_table_cell(node):
+        _collect_cell_block(node, section_path, out, table_ctx)
+        return
+
+    # 표 행은 순회만 하고 블록은 만들지 않음
+    if _is_table_row(node):
+        for child in _children(node):
+            _walk_node(child, section_path, out, table_ctx=table_ctx)
+        return
+
+    # 문단: 문단 내 텍스트와 표 셀을 순서대로 수집
+    if _is_paragraph(node):
+        _collect_paragraph_blocks(node, section_path, out, table_ctx)
+        return
+
+    # 기타 요소: 자식만 순회
+    for child in _children(node):
+        _walk_node(child, section_path, out, table_ctx=table_ctx)
+
+
+def _is_table(node: Any) -> bool:
+    return getattr(node, "local", None) == "tbl" and getattr(node, "ns_uri", None) == "http://www.hwpzone.org/hwpx"
+
+
+def _is_table_row(node: Any) -> bool:
+    return getattr(node, "local", None) == "tr" and getattr(node, "ns_uri", None) == "http://www.hwpzone.org/hwpx"
+
+
+def _is_table_cell(node: Any) -> bool:
+    return getattr(node, "local", None) == "tc" and getattr(node, "ns_uri", None) == "http://www.hwpzone.org/hwpx"
+
+
+def _is_paragraph(node: Any) -> bool:
+    return getattr(node, "local", None) == "p" and getattr(node, "ns_uri", None) == "http://www.hwpzone.org/hwpx"
+
+
+def _children(node: Any) -> list[Any]:
+    try:
+        return list(node.children)
+    except Exception:
+        return []
+
+
+def _new_table_context(table_id: str | None) -> dict[str, Any]:
+    return {
+        "tableId": table_id,
+        "rowIndex": 0,
+        "colIndex": 0,
+        "rowHeaders": [],
+        "columnHeaders": [],
+        "columnGroup": None,
+        "mergedRange": None,
+    }
+
+
+def _next_table_context_after_cell(ctx: dict[str, Any]) -> dict[str, Any]:
+    """한 셀을 처리한 뒤 다음 셀 위치로 문맥을 전진시킨다."""
+    return {
+        "tableId": ctx.get("tableId"),
+        "rowIndex": ctx.get("rowIndex"),
+        "colIndex": ctx.get("colIndex") + 1,
+        "rowHeaders": ctx.get("rowHeaders"),
+        "columnHeaders": ctx.get("columnHeaders"),
+        "columnGroup": ctx.get("columnGroup"),
+        "mergedRange": ctx.get("mergedRange"),
+    }
+
+
+def _table_id_for(node: Any, section_path: str) -> str | None:
+    """표 식별자를 만든다. 실제 양식이 없으면 합성 식별자를 사용한다."""
+    if table_id := node.attributes.get("id"):
+        return table_id
+    # 섹션 경로와 순서로 식별자를 만든다.
+    return f"{section_path}#tbl-{hash(node) & 0xFFFFFFFF & 0xFFFFFFFF}"
+
+
+def _collect_paragraph_blocks(
+    node: Any,
+    section_path: str,
+    out: list[SourceBlock],
+    table_ctx: dict[str, Any] | None = None,
+) -> None:
+    """문단 내 텍스트와 표 셀을 문서 순서로 수집한다.
+
+    문단 안에 표가 있으면 표 셀을 먼저 수집하고, 문단 텍스트만 따로 블록으로 남긴다.
+    문단 텍스트가 없으면 빈 블록을 만들지 않는다.
+    """
+    text_parts: list[str] = []
+    for child in _children(node):
+        if _is_table(child):
+            # 문단 안의 표는 셀을 먼저 처리하고, 표 자체는 별도 블록으로 처리하지 않는다.
+            # 표 셀 처리 시 table_ctx를 전달한다.
+            _walk_node(child, section_path, out, table_ctx=None)
+            continue
+        part = _text_of_node(child)
+        if part:
+            text_parts.append(part)
+
+    full_text = "".join(text_parts)
+    if full_text:
+        out.append(
+            SourceBlock(
+                blockId="",
+                level=0,
+                text=full_text,
+                kind="hwpx-paragraph",
+                start=0,
+                end=len(full_text),
+                children=[],
+                context=[f"section={section_path}"],
+                table_position=table_ctx or {},
+            )
         )
-        if is_table_line:
-            table_position = _next_table_position(line, table_position)
-        blocks.append(block)
-        offset += len(line) + 1
-    return blocks
 
 
-def _extract_txt_blocks(text: str) -> list[SourceBlock]:
-    """일반 텍스트를 줄 단위 블록으로 나눈다."""
-    lines = _split_lines(text)
-    blocks: list[SourceBlock] = []
-    offset = 0
-    for line in lines:
-        block = SourceBlock(
-            blockId=_block_id(blocks, "b"),
-            level=0,
-            text=line,
-            kind="txt-text",
-            start=offset,
-            end=offset + len(line),
-            children=[],
-        )
-        blocks.append(block)
-        offset += len(line) + 1
-    return blocks
+def _collect_cell_block(
+    node: Any,
+    section_path: str,
+    out: list[SourceBlock],
+    table_ctx: dict[str, Any] | None,
+) -> None:
+    """표 셀에서 텍스트를 수집해 SourceBlock을 만든다.
+
+    중첩 표가 있으면 중첩 표 내부 텍스트는 이 셀 블록에 포함하지 않는다.
+    """
+    if table_ctx is None:
+        # 표 문맥이 없는 셀(예: 표 밖의 셀 - 일어나지 않아야 하지만 방어)
+        table_ctx = _new_table_context(None)
+
+    text_parts: list[str] = []
+    for child in _children(node):
+        if _is_table(child):
+            # 중첩 표: 중첩 표는 별도 표로 처리되며, 이 셀의 텍스트에는 포함하지 않는다.
+            # 중첩 표의 결과 블록은 상위 순회에서 따로 수집된다.
+            continue
+        part = _text_of_node(child)
+        if part:
+            text_parts.append(part)
+
+    cell_text = "".join(text_parts)
+    row_index = table_ctx.get("rowIndex", 0)
+    col_index = table_ctx.get("colIndex", 0)
+
+    block = SourceBlock(
+        blockId="",
+        level=0,
+        text=cell_text,
+        kind="hwpx-table-cell",
+        start=0,
+        end=len(cell_text),
+        children=[],
+        context=[f"section={section_path}"],
+        table_position=table_ctx,
+        facts=[],
+    )
+    out.append(block)
+
+    # 표 문맥 전진
+    next_ctx = _next_table_context_after_cell(table_ctx)
+    # 표 행 처리에서 행 인덱스를 전진시키므로 여기선 열만 전진한다.
+    # (실제 행 인덱스 전진은 _walk_node의 표 행 처리에서 담당한다.)
+    _advance_table_context(table_ctx, row_index, col_index + 1)
 
 
-def _split_lines(text: str) -> list[str]:
-    """텍스트를 줄 단위로 나눈다. 빈 줄도 포함한다."""
-    return text.split("\n")
+def _advance_table_context(ctx: dict[str, Any], row_index: int, col_index: int) -> None:
+    ctx["rowIndex"] = row_index
+    ctx["colIndex"] = col_index
 
 
-def _block_id(blocks: list[SourceBlock], prefix: str) -> str:
-    """블록 고유 ID를 생성한다."""
-    return f"{prefix}-{len(blocks):04d}"
+def _text_of_node(node: Any) -> str:
+    """요소 트리의 텍스트 내용을 재귀적으로 수집한다.
+
+    실제 텍스트 노드만 모으고, 중첩 표의 텍스트는 포함하지 않는다.
+    """
+    parts: list[str] = []
+    if node.text:
+        parts.append(node.text)
+    for child in _children(node):
+        if _is_table(child):
+            continue
+        parts.append(_text_of_node(child))
+    return "".join(parts)
+
+
+# ------------------------------------------------------------------
+# SourceBlock / BExtractResult
+# ------------------------------------------------------------------
+
+
+def _block_id_fmt(index: int, prefix: str) -> str:
+    return f"{prefix}-{index:04d}"
 
 
 def _extract_warnings(blocks: list[SourceBlock]) -> list[str]:
@@ -221,11 +459,6 @@ def _extract_warnings(blocks: list[SourceBlock]) -> list[str]:
     if not blocks:
         warns.append("no blocks extracted")
     return warns
-
-
-def _rejoin_text(blocks: list[SourceBlock]) -> str:
-    """블록의 텍스트를 원문 순서대로 재결합한다."""
-    return "\n".join(b.text for b in blocks)
 
 
 class SourceBlock:
@@ -282,13 +515,7 @@ class SourceBlock:
 class BExtractResult:
     """extract_b 결과."""
 
-    __slots__ = (
-        "b_hash",
-        "kind",
-        "analysis_status",
-        "warnings",
-        "blocks",
-    )
+    __slots__ = ("b_hash", "kind", "analysis_status", "warnings", "blocks")
 
     def __init__(
         self,
@@ -306,12 +533,68 @@ class BExtractResult:
         self.blocks = blocks
 
 
-# ---------------------------------------------------------------------------
-# Markdown 제목/표/사실 헬퍼
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# Markdown / TXT 보조 (기존 동작 보존)
+# ------------------------------------------------------------------
+
+
+def _extract_md_blocks(text: str) -> list[SourceBlock]:
+    lines = _split_lines(text)
+    blocks: list[SourceBlock] = []
+    offset = 0
+    md_level = 0
+    table_position: dict[str, Any] = {}
+    for line in lines:
+        line_level = _md_level(line)
+        if line_level is not None:
+            md_level = line_level
+        is_table_line = _looks_like_md_table_row(line)
+        context = _md_context(line, md_level, table_position)
+        facts = _split_facts(line)
+        block = SourceBlock(
+            blockId="",
+            level=0,
+            md_level=line_level,
+            text=line,
+            kind="md-text",
+            start=offset,
+            end=offset + len(line),
+            children=[],
+            context=context,
+            table_position=table_position if is_table_line else {},
+            facts=facts,
+        )
+        blocks.append(block)
+        if is_table_line:
+            table_position = _next_table_position(line, table_position)
+        offset += len(line) + 1
+    return blocks
+
+
+def _extract_txt_blocks(text: str) -> list[SourceBlock]:
+    lines = _split_lines(text)
+    blocks: list[SourceBlock] = []
+    offset = 0
+    for line in lines:
+        block = SourceBlock(
+            blockId="",
+            level=0,
+            text=line,
+            kind="txt-text",
+            start=offset,
+            end=offset + len(line),
+            children=[],
+        )
+        blocks.append(block)
+        offset += len(line) + 1
+    return blocks
+
+
+def _split_lines(text: str) -> list[str]:
+    return text.split("\n")
+
 
 def _md_level(line: str) -> int | None:
-    """Markdown 제목 레벨을 반환한다. 제목이 아니면 None."""
     m = re.match(r"^(#{1,6})\s*(.+)$", line)
     if m:
         return len(m.group(1))
@@ -319,30 +602,22 @@ def _md_level(line: str) -> int | None:
 
 
 def _looks_like_md_table_row(line: str) -> bool:
-    """파이프 표 행인지 보수적으로 판정한다.
-
-    이번 번호는 이스케이프된 세로줄(\\|)을 셀 구분자로 세지 않는다.
-    """
     if not line.strip():
         return False
-    # 맨 앞/뒤에 |가 있고, 이스케이프되지 않은 |가 셀 구분자로 쓰였는지 본다.
     if not (line.startswith("|") or line.startswith("| ")):
         return False
     if not (line.endswith("|") or line.endswith("| ")):
         return False
-    # 이스케이프된 \\|는 건너뛰고 셀 구분 |를 센다
     cells = _md_table_cells(line)
     return len(cells) >= 2
 
 
 def _md_table_cells(line: str) -> list[str]:
-    """파이프 표 행을 셀 리스트로 나눈다. 이스케이프 세로줄은 무시한다."""
     s = line.strip()
     if s.startswith("|"):
         s = s[1:]
     if s.endswith("|"):
         s = s[:-1]
-    # 이스케이프된 \\|를 셀 구분자로 세지 않도록 보호
     parts: list[str] = []
     buf = ""
     i = 0
@@ -364,10 +639,6 @@ def _md_table_cells(line: str) -> list[str]:
 
 
 def _md_context(line: str, md_level: int | None, table_position: dict[str, Any]) -> list[str]:
-    """블록의 문맥을 만든다.
-
-    제목 계층과 표 위치 정보를 문맥에 넣는다.
-    """
     ctx: list[str] = []
     if md_level is not None:
         ctx.append(f"h{md_level}")
@@ -381,11 +652,9 @@ def _md_context(line: str, md_level: int | None, table_position: dict[str, Any])
 
 
 def _next_table_position(line: str, current: dict[str, Any]) -> dict[str, Any]:
-    """표 행을 만날 때 열/행 위치를 진전시킨다."""
     cells = _md_table_cells(line)
     if not cells:
         return current
-    # 첫 행이고 헤더 구분선이면 헤더로 표시
     if _looks_like_md_table_header_sep(line):
         current = {
             "rowIndex": current.get("rowIndex", 0),
@@ -394,7 +663,6 @@ def _next_table_position(line: str, current: dict[str, Any]) -> dict[str, Any]:
             "is_header": True,
         }
         return current
-    # 데이터 행이면 열 인덱스를 증가
     row_index = current.get("rowIndex", 0)
     is_header = current.get("is_header", False)
     if not is_header:
@@ -408,7 +676,6 @@ def _next_table_position(line: str, current: dict[str, Any]) -> dict[str, Any]:
 
 
 def _looks_like_md_table_header_sep(line: str) -> bool:
-    """Markdown 표 헤더 구분선(예: | --- | --- |)인지 판정한다."""
     s = line.strip()
     if not (s.startswith("|") and s.endswith("|")):
         return False
@@ -420,19 +687,12 @@ def _is_sep_cell(c: str) -> bool:
     c = c.strip()
     if not c:
         return True
-    # "---", ":---", "---:", ":---:" 등
     return bool(re.fullmatch(r"[:\-]+\s*$", c))
 
 
 def _split_facts(line: str) -> list[dict[str, Any]]:
-    """한 줄의 단순 사실을 두 사실로 나눈다.
-
-    예: "대표자 김가람, 연락처 010-1234-5678" → 두 사실.
-    이번 단순 구현은 쉼표/세로줄/세미콜론으로 분리 가능한 라벨:값 패턴을 다룬다.
-    """
     if not line.strip():
         return []
-    # 쉼표, 세미콜론, 슬래시로 분리할 수 있으면 여러 사실로 나눈다
     parts = _split_label_value_line(line)
     if len(parts) > 1:
         return [{"originalText": p.strip()} for p in parts if p.strip()]
@@ -440,12 +700,22 @@ def _split_facts(line: str) -> list[dict[str, Any]]:
 
 
 def _split_label_value_line(line: str) -> list[str]:
-    """라벨:값 또는 라벨=값, 쉼표/세미콜론/슬래시 구분선을 고려해 분리한다."""
-    import re
-    # 먼저 이스케이프되지 않은 구분자로 분리
-    # 예: "대표자 김가람, 연락처 010-1234-5678" → 쉼표 기준으로 분리하려면
-    # 라벨:값 패턴이어야 한다. 이번 단순 구현은 쉼표/세미콜론/슬래시로 분리한다.
     sep_regex = re.compile(r"\s*[,;/]\s*")
     if sep_regex.search(line):
         return sep_regex.split(line)
     return [line]
+
+
+def _resolve_kind(kind: str | None, fallback: str | None) -> str:
+    if kind is None:
+        if fallback is None:
+            return "hwpx"
+        return fallback
+    low = kind.lower()
+    if low in ("hwpx", "txt", "md"):
+        return low
+    raise DomainError(
+        "invalid-input",
+        f"kind must be hwpx/txt/md, got {kind!r}",
+        {"received": kind},
+    )

@@ -1,7 +1,6 @@
 # docs/TEAM_CONTRACT.md — HWPX 양식 채움 공통 계약
 
-이 문서는 팀 간 공통 계약의 첫 항목으로 A 분석 계약을 정리한다.
-현재는 A 분석 계약만 작성한다. 다른 단계의 계약은 아직 만들지 않는다.
+이 문서는 A 분석, B 추출, 규칙 연결, Solar 제안, 근거 검증, 사용자 보정과 편집, 생성, 보고서·미리보기와 API의 공통 계약을 정한다.
 
 ## 1. 목적
 
@@ -43,8 +42,8 @@ A 분석 계약(`hwpx/analyze.py`)은 양식 원본 HWPX 파일 A를 받아
 
 - 입력과 함께 원본 A의 해시를 받는다.
 - 해시는 이후에 A의 변경 여부를 다시 확인하는 데 쓴다.
-- 해시 알고리즘은 구현 단계에서 정한다.
-- 지금은 해시 알고리즘 이름을 계약서로 고정하지 않는다.
+- 모든 문서 해시는 해당 원본 바이트의 SHA-256을 소문자 16진수 64자리로 적는다.
+- `sha256:` 같은 접두사는 붙이지 않는다.
 
 ### 3.4 부가 정보
 
@@ -208,7 +207,7 @@ A 분석 계약(`hwpx/analyze.py`)은 양식 원본 HWPX 파일 A를 받아
 ```json
 {
   "analysis_id": "a-analyze-001",
-  "a_hash": "sha256:examplehash",
+  "a_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "file_kind": "hwpx",
   "analysis_status": "partial",
   "warnings": [
@@ -226,17 +225,11 @@ A 분석 계약(`hwpx/analyze.py`)은 양식 원본 HWPX 파일 A를 받아
       "required": true,
       "status": "normal",
       "location": {
-        "section": null,
-        "paragraph": null,
-        "table": {
-          "tableId": "t-001"
-        },
-        "row": {
-          "rowIndex": 2
-        },
-        "column": {
-          "columnIndex": 1
-        }
+        "section": "section0.xml",
+        "paragraph": "p-12",
+        "table": "t-001",
+        "row": 2,
+        "col": 1
       }
     },
     {
@@ -250,17 +243,11 @@ A 분석 계약(`hwpx/analyze.py`)은 양식 원본 HWPX 파일 A를 받아
       "required": false,
       "status": "pending",
       "location": {
-        "section": null,
-        "paragraph": null,
-        "table": {
-          "tableId": "t-002"
-        },
-        "row": {
-          "rowIndex": 5
-        },
-        "column": {
-          "columnIndex": 2
-        }
+        "section": "section0.xml",
+        "paragraph": "p-18",
+        "table": "t-002",
+        "row": 5,
+        "col": 2
       }
     }
   ]
@@ -271,18 +258,11 @@ A 분석 계약(`hwpx/analyze.py`)은 양식 원본 HWPX 파일 A를 받아
 - `location`은 서버 내부 편집 위치 정보다.
 - 화면에는 `fieldId`와 라벨, 구조 위치 정도만 보여 준다.
 - `unit`이 불명확하면 자동 확정하지 않는다.
-- `location`의 내부 객체 키는 아직 전체 스키마가 정해지지 않아 예시에서도 임시 표기로만 남긴다.
+- `location`은 11.5의 서버 내부 위치 객체와 같은 키와 타입을 사용한다.
 
 ## 10. 계약 범위
 
-이 문서는 A 분석 계약과 B 추출 계약을 다룬다.
-다음 항목은 이 계약에서 정하지 않는다.
-
-- 규칙 연결 계약
-- Solar 요청/응답 계약
-- 생성 계약
-- 검증 계약
-- 보고서 계약
+이 문서는 A 분석, B 추출, 규칙 연결, Solar 제안, 근거 검증, 사용자 보정과 편집, 생성, 보고서/미리보기, API 계약을 다룬다.
 
 ## 11. B 추출 계약
 
@@ -339,13 +319,16 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
 - `file_format`
   - 지원 형식으로 판독한 경우 그 형식
 - `extract_status`
-  - 정상 추출, 부분 추출, 빈 내용, 실패 등으로 구분
+  - 타입: 문자열
+  - 가능한 값: `extracted`, `partial`, `empty`, `unsupported`, `failed`
 - `warnings`
   - 추출 중 남긴 경고 목록
 - `missing`
   - 추출하지 못한 부분의 사유 목록
+  - 타입: `Problem` 배열
 - `failure`
   - 추출 실패 시 실패 이유와 구분 정보
+  - 타입: `Problem` 또는 null
   - 실패가 없으면 이 항목은 포함하지 않거나 빈 값으로 둔다.
 
 ### 11.5 위치 객체 규칙
@@ -361,12 +344,8 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
 - `row`: 정수 또는 null
 - `col`: 정수 또는 null
 - 해당 구조가 없으면 null로 둔다.
-- 표 문맥을 남길 때는 다음 필드를 함께 사용할 수 있다.
-  - `tableId`: 문자열 또는 null
-  - `rowHeaders`: 문자열 목록 또는 null
-  - `columnHeaders`: 문자열 목록 또는 null
-  - `columnGroup`: 문자열 또는 null
-  - `mergedRange`: 병합 범위 객체 또는 null
+- 표 문맥인 `tableId`, `rowHeaders`, `columnHeaders`, `columnGroup`, `mergedRange`는 `location`에 넣지 않고 원문 블록의 표 관련 필드나 `context`에 둔다.
+- 붙여넣기 텍스트는 `section`을 `pasted-text`, `paragraph`를 안정적인 블록 ID로 적고 표 위치는 null로 둔다.
 - XML 경로, 바이트 위치, 화면 좌표는 이 객체에 넣지 않는다.
 - 클라이언트나 화면에 보내는 안전한 위치 정보는 아래 화면 표시용 구조만 사용한다.
 
@@ -463,14 +442,6 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
   - 원문과 별도로 관리한다.
   - 원문 블록 ID로 원문과 정리 텍스트를 함께 참조할 수 있어야 한다.
 
-#### 긴 블록 나누기
-
-- UTF-8 기준 6000바이트를 넘는 블록은 한 블록으로 두지 않는다.
-- 원문을 잃지 않게 나눈다.
-- 나눈 조각은 원래 위치를 찾을 수 있어야 한다.
-- 나눈 조각에는 순서 정보와 원본 복원 정보를 함께 남긴다.
-- 타입: 필요 시 `lengthInfo` 객체로 표현한다.
-
 #### 선택 필드
 
 - `notes`
@@ -495,6 +466,7 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
 
 - B는 내용 원본이므로, B의 서식·스타일 ID·이미지 개체·페이지 나누기를
   결과 문서의 A 서식으로 가져오지 않는다.
+- 이미지·비텍스트 개체는 위치와 종류만 메타데이터로 기록한다. 실제 분석이 없으면 텍스트 근거로 사용하지 않는다.
 - 표 구조는 값의 의미를 판단하는 데만 사용한다.
 - 추출 과정에서 B의 글꼴이나 스타일 참조를 결과에 기록하지 않는다.
 
@@ -521,7 +493,9 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
 #### 일반 선택 키
 
 - `normalizedText`: 문자열 또는 null
-- `lengthInfo`: 객체 또는 null
+- `parentSourceBlockId`: 문자열 또는 null
+- `partIndex`: 정수 또는 null
+- `partCount`: 정수 또는 null
 - `notes`: 문자열 또는 null
 - `status`: 문자열 또는 null
 
@@ -532,17 +506,18 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
 - B에 내용이 없으면 빈 블록 목록을 반환할 수 있다.
 - 빈 목록인 경우에도 메타데이터와 해시는 반환한다.
 - “빈 내용”과 “추출 실패”는 구분해야 한다.
-- 이 경우 `extract_status`는 빈 내용으로 표시한다.
+- 이 경우 `extract_status`는 `empty`다.
 
 #### 11.9.2 지원하지 않는 형식
 
 - 지원하지 않는 형식이면 추출을 중단한다.
 - 형식을 억지로 가정하지 않는다.
-- 이 사실은 `failure`나 `missing`으로 남기고, `extract_status`는 실패로 표시한다.
+- 이 사실은 `failure`에 남기고, `extract_status`는 `unsupported`다.
 
 #### 11.9.3 추출 실패
 
 - 읽기 실패, 구조 파악 실패, 허용되지 않은 형식 등으로 구분할 수 있다.
+- 아무 블록도 보존하지 못한 실패의 `extract_status`는 `failed`다.
 - 실패 시에는 실패 이유와 함께 어떤 단계까지 진행했는지 남긴다.
 - 추출한 부분이 있으면 그 부분은 블록으로 남기고, 나머지는 누락으로 표시한다.
 - 실패한 항목 때문에 정상적인 블록까지 버리지 않는다.
@@ -550,6 +525,7 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
 #### 11.9.4 일부 누락
 
 - 일부만 추출했으면 추출하지 못한 부분을 `missing`으로 남긴다.
+- 일부 블록을 보존한 상태에서 누락이 있으면 `extract_status`는 `partial`이다.
 - 누락 사유는 가능한 한 구체적으로 적는다.
 - 누락이 있다고 해서 추출한 정상 블록까지 버리지 않는다.
 
@@ -560,7 +536,7 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
 ```json
 {
   "extract_id": "b-extract-001",
-  "b_hash": "sha256:examplebhash",
+  "b_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "source_kind": "file",
   "file_format": "txt",
   "extract_status": "partial",
@@ -575,9 +551,11 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
       "order": 1,
       "context": ["제목 1", "섹션 0"],
       "sourceLocation": {
-        "type": "paragraph",
-        "section": 0,
-        "line": 1
+        "section": "section0.xml",
+        "paragraph": "p-1",
+        "table": null,
+        "row": null,
+        "col": null
       }
     },
     {
@@ -587,8 +565,11 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
       "order": 2,
       "context": ["표: 기본 정보", "행 제목: 성명, 주소"],
       "sourceLocation": {
-        "type": "table",
-        "table_index": 0
+        "section": "section0.xml",
+        "paragraph": "p-2",
+        "table": "t-001",
+        "row": 0,
+        "col": 1
       },
       "tableId": "t-001",
       "rowPosition": 0,
@@ -604,10 +585,11 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
       "order": 3,
       "context": ["표: 기본 정보", "행 제목: 성명, 주소"],
       "sourceLocation": {
-        "type": "table-cell",
-        "table_index": 0,
+        "section": "section0.xml",
+        "paragraph": "p-3",
+        "table": "t-001",
         "row": 2,
-        "column": 1
+        "col": 1
       },
       "tableId": "t-001",
       "rowPosition": 2,
@@ -622,16 +604,15 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
       "order": 4,
       "context": ["본문"],
       "sourceLocation": {
-        "type": "paragraph",
-        "section": 1,
-        "line": 12
+        "section": "section1.xml",
+        "paragraph": "p-12",
+        "table": null,
+        "row": null,
+        "col": null
       },
-      "lengthInfo": {
-        "originalByteStart": 0,
-        "originalByteEnd": 6200,
-        "chunkIndex": 0,
-        "totalChunks": 2
-      },
+      "parentSourceBlockId": "b-004-source",
+      "partIndex": 0,
+      "partCount": 2,
       "normalizedText": "매우 긴 문단...",
       "status": "partial"
     }
@@ -646,10 +627,11 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
     {
       "reason": "표 1의 세 번째 행 값이 범위를 벗어나 읽히지 않음",
       "affected": {
-        "type": "table-cell",
-        "table_index": 1,
+        "section": "section1.xml",
+        "paragraph": "p-20",
+        "table": "t-002",
         "row": 2,
-        "column": 0
+        "col": 0
       }
     }
   ]
@@ -660,7 +642,7 @@ B 추출 계약(`hwpx/source.py`)은 내용 원본 B를 받아
 - `text`는 원문이고, `normalizedIndex`는 검색·대조용 정리 텍스트다.
 - 표 블록은 `tableId`, 행·열 위치, 행·열 제목, 병합 정보를 문맥으로 남긴다.
 - 제목 계층은 `context`에 문맥으로 남긴다.
-- 긴 블록은 `lengthInfo`로 나누고 원래 위치를 찾을 수 있게 한다.
+- 긴 블록은 `parentSourceBlockId`, `partIndex`, `partCount`로 나누고 원문을 정확히 재결합할 수 있게 한다.
 - 빈 셀은 별도 블록으로 남기고 상태를 표시한다.
 - 일부만 읽힌 표는 `missing`으로 사유를 남긴다.
 
@@ -722,7 +704,7 @@ Solar에는 입력란 문맥과 관련 원문만 보낸다.
 - `status`
   - 연결 상태
   - 타입: 문자열
-  - 가능한 값: `suggested`, `review`, `missing`, `conflict`, `analysis_failed`
+  - 제안 상태: suggested, review, missing, conflict, analysis_failed.
 - `value`
   - 연결·제안된 값
   - 타입: 문자열 또는 null
@@ -738,7 +720,7 @@ Solar에는 입력란 문맥과 관련 원문만 보낸다.
 - `evidenceQuote`
   - 대표 근거 인용문
   - 타입: 문자열 또는 null
-  - `evidence`에 근거가 있으면 그 주요 인용을 요약해 적는다.
+  - `evidence`에 근거가 있으면 첫 번째 항목의 `quote`를 그대로 적는다.
   - `evidence`와 다른 내용을 담지 않는다.
 - `evidence`
   - 여러 근거의 목록
@@ -808,8 +790,9 @@ Solar에는 입력란 문맥과 관련 원문만 보낸다.
 ### 12.7 근거 관계 규칙
 
 - `sourceBlockIds`와 `evidence`는 같은 근거를 서로 다른 형태로 표현한 것이다.
-- `evidenceQuote`는 `evidence`의 주요 인용을 요약한 것이지, 별개의 새 근거가 아니다.
+- `evidenceQuote`는 `evidence` 첫 번째 항목의 `quote`이며, 별개의 새 근거가 아니다.
 - 세 필드가 서로 다른 내용을 담지 않도록 유지한다.
+- evidence는 [{sourceBlockId, quote}, …] 목록으로 하고, sourceBlockIds는 evidence의 ID 목록, evidenceQuote는 evidence가 있으면 첫 번째 quote로 정의한다. sourceBlockIds 또는 evidenceQuote가 evidence와 일치하지 않으면 검증 실패로 처리한다.
 - 대안이 여러 개면 `alternatives`에 남기고, 대표 값은 `value`에 둔다.
 
 ### 12.8 작은 반환 예시
@@ -843,7 +826,7 @@ Solar에는 입력란 문맥과 관련 원문만 보낸다.
       "value": null,
       "valueTransform": "none",
       "sourceBlockIds": ["b-005", "b-006"],
-      "evidenceQuote": "두 근거가 서로 다른 주소를 가리킴",
+      "evidenceQuote": "주소\t서울시",
       "evidence": [
         {
           "sourceBlockId": "b-005",
@@ -887,7 +870,7 @@ Solar에는 입력란 문맥과 관련 원문만 보낸다.
 
 이 예시에서
 - `sourceBlockIds`와 `evidence`는 같은 근거를 목록/짝 형태로 표현한 것이다.
-- `evidenceQuote`는 `evidence`의 주요 인용 요약이며, 별개 근거가 아니다.
+- `evidenceQuote`는 `evidence` 첫 번째 항목의 `quote`이며, 별개 근거가 아니다.
 - 충돌은 하나의 값으로 확정하지 않고 `alternatives`로 남긴다.
 - 근거가 없으면 `missing`으로 표시하고 값을 채우지 않는다.
 
@@ -980,11 +963,7 @@ XML, 서식, 편집 위치는 보내지 않는다.
   - `sourceBlockIds`, `evidence`, `evidenceQuote`는 서로 다른 내용을 담지 않는다.
   - 근거 항목을 남기지 않으면 null로 둔다.
 
-- `evidenceQuote`
-  - 근거 중 대표 인용문
-  - 타입: 문자열 또는 null
-  - `evidence`에 포함된 인용문 중 하나를 요약하거나 그대로 쓴다.
-  - `evidence`가 비어 있으면 단독으로 근거를 만들지 않는다.
+`evidence`가 비어 있으면 `sourceBlockIds`는 빈 배열, `evidenceQuote`는 null로 둔다.
 
 `EvidenceEntry`와 `AlternativeEntry`는
 12.4에서 정의한 같은 구조를 따른다.
@@ -1158,7 +1137,7 @@ XML, 서식, 편집 위치는 보내지 않는다.
 - `type`
   - 문제 종류
   - 타입: 문자열
-  - 가능한 값: `invalid_field_id`, `missing_quote`, `value_mismatch`, `unit_unclear`, `duplicate_response`, `batch_partial_failure`, `call_failed`, `conflict`, `empty_proposal`, `response_missing`, `user_value_protected`, `other`
+  - 가능한 값: `unsupported_format`, `read_failed`, `parse_failed`, `content_missing`, `invalid_field_id`, `missing_quote`, `value_mismatch`, `unit_unclear`, `duplicate_response`, `batch_partial_failure`, `call_failed`, `conflict`, `empty_proposal`, `response_missing`, `user_value_protected`, `other`
 - `fieldId`
   - 관련 입력란 ID
   - 타입: 문자열 또는 null
@@ -1175,6 +1154,18 @@ XML, 서식, 편집 위치는 보내지 않는다.
 
 #### 주요 문제 구분
 
+- `unsupported_format`
+  - 지원하지 않는 입력 형식인 경우
+  - 심각도: error
+- `read_failed`
+  - 입력 파일을 읽지 못한 경우
+  - 심각도: error
+- `parse_failed`
+  - 파일은 읽었지만 구조를 해석하지 못한 경우
+  - 심각도: error
+- `content_missing`
+  - 일부 내용이나 구조를 추출하지 못한 경우
+  - 심각도: warning 또는 error
 - `invalid_field_id`
   - 존재하지 않는 입력란 ID를 참조한 경우
   - 심각도: error
@@ -1699,7 +1690,7 @@ A의 복사본에서 선택한 구간만 수정하고 결과를 만든다.
 ```json
 {
   "result_id": "result-001",
-  "resultHash": "sha256:resulthash",
+  "resultHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "resultBytes": "...base64 또는 바이트...",
   "changedFields": [
     {
@@ -1976,8 +1967,8 @@ A의 복사본에서 선택한 구간만 수정하고 결과를 만든다.
         "notes": "문단 일부 텍스트 교체"
       }
     ],
-    "inputHash": "sha256:inputhash",
-    "outputHash": "sha256:outputhash"
+    "inputHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "outputHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
   },
   "preview": {
     "previewStatus": "available",
@@ -2007,22 +1998,74 @@ A의 복사본에서 선택한 구간만 수정하고 결과를 만든다.
 - 미리보기를 만들지 못한 상태도 표현할 수 있다.
 - 사용자 입력이 바뀌면 이전 결과와 다운로드는 최신 결과처럼 남기지 않는다.
 
-## 18. 미정 사항
+## 18. API 계약
 
-- 해시 알고리즘과 해시 길이 표기 방식은 아직 정하지 않았다.
-- B의 긴 블록을 나누는 크기 기준과 재결합 검증 방식은 아직 정하지 않았다.
-- 표·셀·행·열 위치를 표현하는 전체 스키마는 아직 정하지 않았다.
-- 붙여넣기 텍스트의 출처 위치 표현은 아직 정하지 않았다.
-- failure와 missing의 코드 체계는 아직 정하지 않았다.
-- extract_status의 상태 값 전체 명칭은 아직 정하지 않았다.
-- 이미지나 비텍스트 개체를 블록으로 다룰지 여부는 아직 정하지 않았다.
+하나의 API 진입점이 JSON 본문의 `action`에 따라 `status`, `analyze`, `suggest`, `generate`, `preview`를 처리한다. 성공 응답에는 요청한 `action`과 `status: "ok"`를 넣는다.
+
+### 18.1 공통 입력
+
+- `FileInput`: `{ "name": "양식.hwpx", "base64": "..." }`
+- `SourceInput`: `{ "kind": "hwpx|txt|md", "name": "원본.txt", "base64": "..." }` 또는 `{ "kind": "txt|md", "text": "..." }`
+- 파일 바이트는 base64 문자열로 전송한다.
+- 클라이언트는 XML 경로, 바이트 위치, 편집 범위를 지정하지 않는다.
+- 서버는 생성 시 원본 A 해시와 편집 위치를 다시 검증한다.
+
+### 18.2 상태 확인
+
+- 요청: `{ "action": "status" }`
+- 응답: `{ "action": "status", "status": "ok", "version": "<semver>" }`
+
+### 18.3 분석
+
+- 요청: `{ "action": "analyze", "a": <FileInput>, "b": <SourceInput> }`
+- 응답: `{ "action": "analyze", "status": "ok", "analysis": { ... }, "source": { ... } }`
+- `analysis`는 `analyze_a` 결과이고, `source`는 `extract_b` 결과다.
+
+### 18.4 제안
+
+- 요청: `{ "action": "suggest", "fields": [ ... ], "blocks": [ ... ], "ruleResults": [ ... ] }`
+- 응답: `{ "action": "suggest", "status": "ok", "suggestions": [ ... ], "warnings": [ ... ] }`
+- `fields`, `blocks`, `ruleResults`, `suggestions`는 각각 `Field`, `SourceBlock`, `RuleResult`, `SolarProposal` 계약을 따른다.
+- Solar에는 입력란 ID·문맥·단위와 관련 원문만 보내며 XML과 내부 편집 위치는 보내지 않는다.
+
+### 18.5 생성
+
+- 요청: `{ "action": "generate", "a": <FileInput>, "aHash": "<64자리 해시>", "fields": [ ... ], "blocks": [ ... ], "edits": [ ... ], "suggestions": [ ... ] }`
+- 응답: `{ "action": "generate", "status": "ok", "result": { ... }, "report": { ... } }`
+- `edits`는 `Edit`, `result`는 16.4의 생성 결과, `report`는 `Report` 계약을 따른다.
+- 검증된 선택만 적용하며 구조 검증에 실패하면 결과 파일을 반환하지 않는다.
+
+### 18.6 미리보기
+
+- 요청: `{ "action": "preview", "resultBytes": "...base64..." }`
+- 응답: `{ "action": "preview", "status": "ok", "preview": { ... } }`
+- 미리보기는 결과 HWPX에서 다시 추출하며 실제 렌더링 결과로 표시하지 않는다.
+
+### 18.7 오류 형식
+
+- 오류 응답: `{ "code": "<기계 판독 코드>", "message": "<사람이 읽는 메시지>", "details": { ... } }`
+- `code`와 `message`는 필수이며 `details`는 객체 또는 null이다.
+- 크기 초과, 지원하지 않는 입력, 잘못된 action, 구조 검증 실패, Solar 부분 실패를 서로 다른 `code`로 구분한다.
+- 일부 항목만 실패한 경우 정상 결과를 보존하고 실패 항목을 `details`에 남긴다.
+
+### 18.8 전송과 Solar 제한
+
+- 인코딩된 요청과 응답은 각각 3,800,000바이트 이하다.
+- base64를 해제한 A와 B의 합계는 2,500,000바이트 이하다.
+- 결과 HWPX ZIP은 2,500,000바이트 이하다.
+- ZIP 전체 압축 해제 크기와 개별 파일의 압축 해제 크기는 각각 50,000,000바이트 이하다.
+- ZIP 엔트리는 5,000개 이하다.
+- 보고서와 미리보기도 응답 크기에 포함한다.
+- Solar 한 배치는 입력란 20개 이하, 요청 본문은 48,000바이트 이하로 제한한다.
+- Solar 동시 요청은 최대 2개다. 전체 입력란을 240개로 제한하지 않고 배치로 나눠 처리한다.
+- Solar 모델은 `solar-pro4`, 서버 환경 변수는 `UPSTAGE_API_KEY`를 사용한다.
 
 ## 19. 관련 문서
 
 - 루트 `SKILL.md`
 - `PROJECT_BLUEPRINT.md`
 - `docs/WORK_RULES.md`
-- `docs/TEAM_CONTRACT.md`의 A 분석 계약
+- `docs/TEAM_CONTRACT.md`의 공통 계약
 - `reference/qualifier` 아래 예선 원본
 
 충돌이 생기면 루트 SKILL.md의 절대 규칙을 우선한다.

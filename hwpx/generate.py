@@ -44,6 +44,11 @@ def generate_result(
     Returns:
         dict: result_id, resultHash, resultBytes, changedFields, warnings, errors.
     """
+    with zipfile.ZipFile(io.BytesIO(a_bytes)) as archive:
+        native = 'Contents/content.hpf' in archive.namelist()
+    if native:
+        from hwpx.fill import generate_native
+        return generate_native(a_bytes, a_hash, edits, proposals, blocks)
     result_id = f"result-{a_hash[:8]}"
     resultHash = a_hash
     warnings: list[dict[str, Any]] = []
@@ -116,27 +121,26 @@ def generate_result(
         if fid in field_index_by_id:
             edit_by_field[fid] = e.get("value", "")
 
-    t_blocks = _find_editable_t_elements(section_text)
-
     new_text = section_text
     changes_made = False
-    for i, f in enumerate(editable_fields):
+    for f in editable_fields:
         fid = f["fieldId"]
         if fid not in edit_by_field:
             continue
-        if i >= len(t_blocks):
+        old_text = f.get("originalText", "")
+        if not old_text:
             warnings.append({
                 "type": "other",
                 "fieldId": fid,
-                "message": "편집 대상 hp:t 요소를 충분히 찾지 못함",
+                "message": "편집 대상 원본 텍스트가 비어 있음",
                 "severity": "warning",
                 "detail": {"fieldId": fid},
             })
             continue
-        old_text = t_blocks[i]
-        escaped = _escape_value(edit_by_field[fid])
-        new_text, count = _replace_t_text_at_index(new_text, i, old_text, escaped)
-        if count == 0:
+        value = edit_by_field[fid]
+        escaped = _escape_value(value)
+        new_text, replaced = _replace_first_t_with_text(new_text, old_text, escaped)
+        if not replaced:
             warnings.append({
                 "type": "other",
                 "fieldId": fid,
@@ -148,10 +152,22 @@ def generate_result(
         changes_made = True
         changedFields.append({
             "fieldId": fid,
-            "value": edit_by_field[fid],
+            "value": value,
             "origin": "manual",
             "sourceBlockIds": None,
         })
+        # 넘침 경고: 원본 대비 충분히 길면 overflow_risk
+        if len(value) > len(old_text) * 30:
+            warnings.append({
+                "type": "overflow_risk",
+                "fieldId": fid,
+                "message": "내용 길이 증가로 넘침 가능성이 있음",
+                "severity": "warning",
+                "detail": {
+                    "originalLength": len(old_text),
+                    "newLength": len(value),
+                },
+            })
 
     if not changes_made:
         return _no_edits_result(result_id, resultHash, a_bytes)
@@ -218,6 +234,21 @@ def _replace_t_text_at_index(
     tag_body = m.group(0)
     new_tag_body = tag_body.replace(m.group("text"), new_text, 1)
     return text[:start] + new_tag_body + text[end:], 1 if new_tag_body != tag_body else 0
+
+
+def _replace_first_t_with_text(text: str, old_text: str, new_text: str) -> tuple[str, bool]:
+    """text에서 old_text와 일치하는 첫 번째 hp:t의 텍스트를 new_text로 교체한다.
+
+    old_text는 원본 텍스트(escape 전), new_text는 escape된 값.
+    일치하면 (새텍스트, True), 없으면 (원본, False).
+    """
+    pattern = re.compile(r'(<hp:t(\s[^>]*)?>)(.*?)(</hp:t>)', re.S)
+    for m in pattern.finditer(text):
+        if m.group(3) == old_text:
+            start, end = m.start(), m.end()
+            new_tag = m.group(1) + new_text + m.group(4)
+            return text[:start] + new_tag + text[end:], True
+    return text, False
 
 
 def _escape_value(value: str) -> str:

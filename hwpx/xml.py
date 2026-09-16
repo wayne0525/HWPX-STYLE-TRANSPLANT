@@ -72,8 +72,9 @@ def read_xml(payload: bytes | ReadResult) -> XmlReadResult:
             {"received_type": type(payload).__name__},
         )
 
-    hpf_bytes = _require_bytes(result, "Content.hpf")
-    hpf_info = _parse_content_hpf(hpf_bytes)
+    hpf_path = "Contents/content.hpf" if result.has_path("Contents/content.hpf") else "Content.hpf"
+    hpf_bytes = _require_bytes(result, hpf_path)
+    hpf_info = _parse_native_hpf(hpf_bytes, result) if hpf_path.startswith("Contents/") else _parse_content_hpf(hpf_bytes)
 
     sections = _read_sections(result, hpf_info.section_paths)
 
@@ -213,6 +214,32 @@ class XmlElement:
 class _HpfParseResult:
     def __init__(self, section_paths: list[str]) -> None:
         self.section_paths = section_paths
+
+
+def _parse_native_hpf(raw: bytes, package: ReadResult) -> _HpfParseResult:
+    import posixpath
+    from xml.etree import ElementTree as ET
+    _reject_doctype_and_entities(raw)
+    root = ET.fromstring(raw)
+    ns = {"opf": "http://www.idpf.org/2007/opf/"}
+    if root.tag != "{" + ns["opf"] + "}package":
+        raise DomainError(BAD_XML, "Invalid OPF package", {})
+    items = {}
+    for item in root.findall("opf:manifest/opf:item", ns):
+        key, href = item.get("id"), item.get("href", "")
+        if not key or key in items or not href or href.startswith(("/", "\\")) or ":" in href or "\\" in href or ".." in href.split("/"):
+            raise DomainError(BAD_XML, "Invalid manifest item", {})
+        path = href if href.startswith("Contents/") else posixpath.join("Contents", href)
+        items[key] = path
+    paths = []
+    for item in root.findall("opf:spine/opf:itemref", ns):
+        path = items.get(item.get("idref"))
+        if not path or not package.has_path(path) or path in paths:
+            raise DomainError(SECTION_ORDER_BAD, "Invalid spine reference", {})
+        paths.append(path)
+    if not paths:
+        raise DomainError(SECTION_ORDER_BAD, "Empty spine", {})
+    return _HpfParseResult(paths)
 
 
 def _parse_content_hpf(hpf_bytes: bytes) -> _HpfParseResult:
@@ -370,7 +397,7 @@ def _reject_doctype_and_entities(raw: bytes) -> None:
         )
 
     # 대소문자 무시를 위해lower 케이스로 검사하되, 원본 위치는 보존한다.
-    low = raw.lower()
+    low = raw.replace(b"\x00", b"").lower()
     if b"<!doctype" in low:
         raise DomainError(
             UNSAFE_XML,

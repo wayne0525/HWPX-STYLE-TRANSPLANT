@@ -1,9 +1,20 @@
 # docs/state/engine.md — HWPX_TRANSPLANT
 
-- 단계: **P01 준비 중 → 루트 SKILL.md 방향 정리 완료**
+## 2026-09-16 실제 HWPX 엔진 전환 검사
+
+- `team/engine-dylan`의 `7f44546` 분석 규칙을 `hwpx/template.py`로 도입하고 위치 기반 생성은 `hwpx/fill.py`에서 수행
+- 실제 패키지는 기존 공개 진입점 analyze_a / generate_result / validate_output에서 새 엔진으로 연결
+- 신규 검사 `python -m pytest tests/engine/test_native_engine.py -q`: 12 passed
+- 전체 검사 `python -m pytest tests/engine -q`: 143 passed, 11 failed, 1 skipped — 전체 완료 아님
+- 실제 A.hwpx 10칸, 공모사업 신청서 75칸에 시험값 기입 및 위치별 재추출 일치 — 사람 정답 탐지율이나 시각 검증 결과가 아님
+- 기존 평가 fixture, 수동 후보 fixture, raw XML을 HWPX로 전달하는 검사, 표 연결 실패는 남아 있음
+- 이번 변경은 미커밋 상태이며 main 통합 전 서비스 연결 및 전체 실패 해결 필요
+- 상세: `docs/ENGINE_MIGRATION.md`
+
+- 단계: **공통 계약 보완 반영, 엔진 구현과 검증 기록 정리 중**
 - 브랜치: `team/engine`
 - 대상 서비스: A 양식(표·문단·고정 문구) 보존 + B(HWPX·TXT·Markdown·붙여넣기)의 근거 있는 내용을 선택한 입력란에 채움
-- 엔진/API 구현: 이번 단계에서 만들지 않음
+- 구현 상태: 아래 엔진 구현 기록 참고, 이번 문서 정리에서는 코드와 테스트를 실행하지 않음
 - 우선순위: 참고 자료와 충돌할 때는 루트 SKILL.md의 절대 규칙을 우선한다
 - 예선 원본: `reference/qualifier` 아래의 원본은 수정하지 않는다
 
@@ -59,7 +70,7 @@ OK  reference/qualifier/schemas/style-profile.schema.json
 OK  reference/qualifier/schemas/transplant-report.schema.json
 OK  reference/qualifier/SKILL.md
 
-## 실제로 확인한 내용
+## 초기 준비 당시 확인한 내용
 
 - 루트 `SKILL.md`를 PROJECT_BLUEPRINT.md의 목표대로 다시 썼다.
   - A는 표·문단·서식·고정 문구를 그대로 보존하는 틀로 둔다.
@@ -71,14 +82,14 @@ OK  reference/qualifier/SKILL.md
   - UPSTAGE_API_KEY.md는 열지도 않고 삭제하지도 않았다.
   - 제외만 적용했다.
 - `reference/qualifier` 아래의 예선 원본은 수정하지 않았다.
-- 현재 상태는 문서 정리 단계이며, 구현 완료나 테스트 통과로 기록하지 않는다.
+- 이 절은 초기 문서 정리 당시의 기록이며 현재 구현 완료나 테스트 통과를 뜻하지 않는다.
 
 ## 아직 확인하지 않은 내용 / 오래된 설명 바로잡기
 
 - 예전 표현 중 "B 내용 빈칸 채움"은 방향을 단순하게 줄인 말이었다. 지금은 "B의 근거 있는 내용을 선택한 입력란에 채움"으로 이해한다.
-- 서비스 흐름 전체(분석 → 규칙 연결 → Solar 제안 → 근거 검사 → 사용자 검토 → 생성 → 재검증 → 다운로드)가 문서상 연결되어 있는지는 PROJECT_BLUEPRINT.md 기준으로만 확인했다. 실제 구현이나 실행은 하지 않았다.
-- 검사 목록 중 "P02 항목이 다음 단계로만 적혀 있는지"는 이전 시점에 확인한 항목이다. 현재는 P02가 아직 미정이며, 다음 준비 항목으로만 적혀 있다.
-- 루트 SKILL.md와 `references/08-output-contract.md`의 폴백 방향이 충돌하는지는 문서로 확인했지만, 이 충돌을 해결하거나 재심소한 것은 아니다.
+- 초기 준비에서는 전체 흐름을 PROJECT_BLUEPRINT.md 기준으로 확인했다. 이후 구현 기록은 아래에 따로 남기며 이번 문서 정리에서 실행 결과를 새로 검증하지 않았다.
+- 초기 준비 단계 안내는 현재 작업 순서로 사용하지 않는다. 현재 코드와 공통 계약의 차이를 확인하고 남은 구현 문제를 처리한다.
+- 참고 자료의 DOCX/PDF 성공 폴백 규칙은 적용하지 않는다. 루트 SKILL.md에 따라 검증된 HWPX만 성공 결과로 제공한다.
 
 ## TEAM_CONTRACT 전체 점검 결과
 
@@ -88,16 +99,16 @@ OK  reference/qualifier/SKILL.md
 
 ### 이어진 흐름으로 확인한 부분
 
-- A 분석 결과(`fields`, `blocks`, `aHash`, `analysis_status`)는 규칙 연결 입력과 Solar 배치 구성에 이어 쓸 수 있다.
+- A 분석의 `fields`와 `a_hash`, B 추출의 `blocks`와 `normalizedIndex`를 각 후속 함수의 입력 이름에 맞춰 연결한다. A의 `a_hash`는 규칙 연결 입력의 `aHash`에 대응한다.
 - 규칙 연결 결과(`RuleResult` 배열)와 B 원문 블록(`SourceBlock` 배열)은 Solar 제안 빌드와 근거 검증 입력으로 이어 쓸 수 있다.
 - Solar 제안 응답(`proposals`)은 근거 검증과 사용자 검토 입력으로 이어 쓸 수 있다.
 - 근거 검증 결과(`validation`)와 사용자 보정/편집(`corrections`, `edits`)은 생성 입력으로 이어 쓸 수 있다.
 - 생성 결과(`resultBytes`, `changedFields`, `summary`, `warnings`)는 보고서와 미리보기로 이어 쓸 수 있다.
 
-### 계약 안에서 표현이 다른 부분
+### 구현에서 확인할 연결
 
-- A 분석 계약은 정규화 인덱스(`normalizedIndex`)를 명시적으로 반환한다고 적어 두지 않았는데, 규칙 연결 계약은 이 값을 입력으로 받는다.
-- `evidence` / `sourceBlockIds` / `evidenceQuote`의 관계가 규칙 연결, Solar 제안, 근거 검증, 편집 검증에서 서로 조금씩 다른 표현으로 적혀 있다.
+- `normalizedIndex`는 B 원문 블록의 검색용 정리 텍스트다. 규칙 연결과 근거 검증에 B 추출 결과가 전달되는지 확인해야 한다.
+- `sourceBlockIds`는 `evidence`의 ID 순서와 같고 `evidenceQuote`는 첫 번째 인용문과 같아야 한다. 이 규칙이 실제 검증 함수에 적용됐는지는 별도 확인이 필요하다.
 - 생성 계약의 `changedFields`와 보고서/미리보기의 `changedParts`, `summary`와 보고서 요약은 연결 문장은 넣었지만, 완전 동일한 키/타입으로 통일한 상태는 아니다.
 
 ### 이번 점검에서 맞춘 부분
@@ -105,33 +116,31 @@ OK  reference/qualifier/SKILL.md
 - A 분석 입력란 필드 목록을 본문 정의와 예시에서 맞췄다.
   - 선택 필드로 `status`를 추가했다.
   - 9장 예시를 카멜케이스로 바꾸고, 본문 정의와 겹치게 `fieldId`, `candidateId`, `originalText`, `context`, `unit`, `editable`, `required`, `status`, `location`을 포함한 최소 예시로 수정했다.
-  - `location` 내부 키는 아직 전체 스키마가 정해지지 않아 예시에서도 임시 표기로만 남겼다.
+   - `location`은 공통 계약의 `section`, `paragraph`, `table`, `row`, `col`과 해당 타입을 따른다.
 - 생성 결과 → 보고서/미리보기로 이어지는 문장을 보강했다.
   - `changedFields`가 `changedParts`의 출처로 쓰일 수 있다는 점을 명시했다.
   - `summary`가 보고서 요약의 출처로 쓰일 수 있다는 점을 명시했다.
   - 미리보기가 생성 결과에서 재추출된다는 점과 못 만든 상태 표현도 다시 남겼다.
 
-### 아직 통일하지 못한 부분
+### 공통 계약에서 확정한 항목
 
-- `normalizedIndex`의 반환/입력 정의
-- `evidence` / `sourceBlockIds` / `evidenceQuote` 관계 표현
-- 상태 값 전체 명칭
-- 실패/누락 코드 체계
-- 해시 알고리즘
-- 위치 객체 내부 키 전체
-- 긴 블록 나누기 기준
-- 이미지·비텍스트 개체 처리
+- 해시는 원본 바이트의 SHA-256 소문자 16진수 64자리이며 접두사를 붙이지 않는다.
+- 위치 객체, 추출 상태, 실패와 누락 코드, 근거 필드 관계는 `docs/TEAM_CONTRACT.md`의 정의를 따른다.
+- 긴 블록은 UTF-8 6000바이트 이내로 나누고 원문을 정확히 재결합할 수 있어야 한다.
+- 이미지와 비텍스트 개체는 종류와 위치를 기록하며 실제 분석 없이 텍스트 근거로 쓰지 않는다.
+- API 동작과 전송 제한은 공통 계약 18절을 따른다.
+- 계약 확정은 해당 동작의 구현이나 검사 통과를 뜻하지 않는다.
 
-### 다른 문서와 충돌해서 아직 결정 못 한 부분
+### 참고 자료와 충돌할 때 적용할 기준
 
 - `references/08-output-contract.md`와 `examples/example-04-docx-fallback.md`의 DOCX/PDF 폴백 방향
-- 이 충돌은 예선 원본 수정 범위를 정하거나 새 폴백 규칙을 만들 때 함께 다뤄야 한다.
-- 지금은 루트 SKILL.md의 절대 규칙이 우선이라는 점만 문서에 남긴다.
+- 위 참고 자료의 폴백은 적용하지 않는다. 루트 SKILL.md의 절대 규칙을 우선하며 검증된 HWPX만 성공 결과로 제공한다.
+- 예선 원본은 수정하지 않고 보존한다.
 
-## 코드/함수 구현 상태
+## 초기 계약 작성 당시의 함수 목록
 
-- 이번 단계에서 함수 코드나 테스트 코드는 만들지 않았다.
-- 계약에 적힌 함수는 설계 표기이며 실제 구현을 완료한 것이 아니다.
+- 초기 계약 작성에서는 함수 코드나 테스트를 만들지 않았다. 아래는 당시의 설계 목록이며 현재 미구현 목록이 아니다.
+- 이후 구현 기록은 아래 엔진 구현 결과를 참고하며, 실제 계약 준수 여부는 코드 대조와 실행 검사로 판단한다.
   - `hwpx/analyze.py` / `analyze_a`
   - `hwpx/source.py` / `extract_b`
   - `hwpx/rules.py` / `connect_rules`
@@ -146,24 +155,20 @@ OK  reference/qualifier/SKILL.md
 
 ## 남은 의존성
 
-- 함수 구현은 하지 않았으므로 실제 입력/출력 검증은 아직 불가능하다.
-- 정규화 인덱스, 증거 필드 관계, 상태/코드 체계, 위치 객체 내부 키, 긴 블록 나누기 기준은 계약 보완이 더 필요하다.
-- DOCX/PDF 폴백 충돌은 예선 원본 수정 범위나 새 폴백 규칙을 정할 때 함께 정리해야 한다.
-- 다음 단계로 넘어가려면 위 미정 항목 중 우선 정리할 항목을 먼저 정해야 한다.
+- 기존 구현의 입력과 반환값을 보완된 공통 계약과 대조해야 한다.
+- 실제 양식 검증과 엔진 회귀 검사를 실행해 현재 통과와 실패를 기록해야 한다. 과거 검사 기록만으로 최신 상태를 통과 처리하지 않는다.
 
 ## 남은 문제
 
 - `references/08-output-contract.md`에 HWPX를 못 만들 때 DOCX/PDF를 성공 결과로 대신 제공하는 방향의 표현이 남아 있다.
 - `examples/example-04-docx-fallback.md`도 같은 방향의 예시를 담고 있다.
 - 이번 작업에서는 두 파일을 예선 원본으로 보고 수정하지 않기로 했다.
-- 따라서 루트 SKILL.md의 "HWPX를 목표로 하되 DOCX/PDF를 성공 결과로 대신 제공하지 않는다"는 방향과, `references/08-output-contract.md`의 폴백 방향이 충돌한 채로 남아 있다.
-- 이 충돌은 다음 단계에서 예선 원본 수정 범위를 정하거나, 새 폴백 규칙을 따로 정리할 때 함께 다뤄야 한다.
-- 충돌 처리 전까지는 루트 SKILL.md의 절대 규칙이 우선이라는 점만 문서에 남긴다.
+- 참고 자료의 해당 폴백은 적용하지 않는다. 루트 SKILL.md에 따라 검증된 HWPX만 성공 결과로 제공한다.
 
-## 코드 구현 상태
+## 초기 준비 작업 기록
 
-- 이번 단계에서 코드·스크립트·변환 로직은 만들지 않았다.
-- 루트 SKILL.md와 .gitignore만 수정했고, Git 커밋·푸시는 아직 하지 않았다.
+- 초기 준비 당시에는 코드·스크립트·변환 로직을 만들지 않았다.
+- 루트 SKILL.md와 .gitignore를 수정한 당시 기록이다. 현재 커밋·푸시 상태는 이 기록으로 판단하지 않는다.
 - 이 문서는 설계·상태 정리용이며, 구현이나 성능이 검증됐다고 기록하지 않는다.
 
 ## E01/E02 실제 구현 결과
@@ -267,9 +272,7 @@ OK  reference/qualifier/SKILL.md
 - `references/08-output-contract.md`에 HWPX를 못 만들 때 DOCX/PDF를 성공 결과로 대신 제공하는 방향의 표현이 남아 있다.
 - `examples/example-04-docx-fallback.md`도 같은 방향의 예시를 담고 있다.
 - 이번 작업에서는 두 파일을 예선 원본으로 보고 수정하지 않기로 했다.
-- 따라서 루트 SKILL.md의 "HWPX를 목표로 하되 DOCX/PDF를 성공 결과로 대신 제공하지 않는다"는 방향과, `references/08-output-contract.md`의 폴백 방향이 충돌한 채로 남아 있다.
-- 이 충돌은 다음 단계에서 예선 원본 수정 범위를 정하거나, 새 폴백 규칙을 따로 정리할 때 함께 다뤄야 한다.
-- 이번 충돌 처리 전까지는 루트 SKILL.md의 절대 규칙이 우선이라는 점만 문서에 남긴다.
+- 참고 자료의 해당 폴백은 적용하지 않는다. 루트 SKILL.md에 따라 검증된 HWPX만 성공 결과로 제공한다.
 - E04 analyze_a는 문단 수준 후보만 다루며, 실제 A 양식 문서의 제어 개체/필드 구조를 일반화하지 않았다.
 - analyze_a의 후보 ID 체계는 sha 기반 오프셋으로 안정성을 확보했지만, 파일 구조가 달라지면 ID가 바뀌는 범위가 있을 수 있다.
 - analyze_a의 고정 문구 판정은 라벨/안내 문구 중심으로만 동작하며, 실제 양식의 다양한 고정 문구를 모두 커버하지 않는다.
@@ -280,8 +283,8 @@ OK  reference/qualifier/SKILL.md
 - E06 extract_b는 B를 텍스트 블록으로 추출하는 단계이며, 표 문맥(행/열/병합)을 SourceBlock에 연결하는 단계는 아직 별도 처리가 필요하다.
 - E06의 HWPX 텍스트 추출은 XML 태그를 제거하고 텍스트만 남기므로, 실제 HWPX의 문단/표 구조를 보존한 채 추출하려면 추후 구조 보존 추출이 필요하다.
 - E06b의 Markdown 표/사실 분할은 이번에 명시한 패턴만 다루며, 다른 표 형식이나 사실 분리 표현은 별도 규칙이 필요하다.
-- E06b의 SourceBlock 확장은 context/table_position/facts를 추가했으나, 실제 규칙 연결 단계에서 이 필드를 어떻게 사용할지는 아직 별도 계약이 필요하다.
+- E06b에서 추가한 context/table_position/facts가 공통 계약의 SourceBlock과 규칙 연결 입력에 맞는지 대조해야 한다. 내부 확장 필드를 공통 계약의 필드로 간주하지 않는다.
 
-## 다음 번호
+## 이어서 확인할 작업
 
-- P02: (미정 — 루트 SKILL.md와 reference/qualifier 예선 원본 사이의 폴백 방향 충돌을 정리한 뒤, 공통 계약과 준비 검사로 넘어감)
+- 현재 엔진 코드와 공통 계약의 입력, 반환값, 근거 규칙을 대조하고 실제 회귀 검사 결과를 기록한다. 완료한 준비 단계는 다시 시작하지 않는다.

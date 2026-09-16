@@ -405,6 +405,14 @@ def analyze_a(xml_result, *, a_bytes: bytes, a_sha256: str) -> AAnalysis:
             {"received_type": type(a_bytes).__name__},
         )
 
+    if b'http://www.hancom.co.kr/hwpml/2011/paragraph' in a_bytes or any(b'http://www.hancom.co.kr/hwpml/2011/paragraph' in s.bytes for s in xml_result.sections):
+        from hwpx.template import analyze_a as analyze_native, public_fields
+        result = analyze_native(bytes(a_bytes))
+        if result['a_hash'] != a_sha256:
+            raise DomainError('hash-mismatch', 'A hash mismatch', {})
+        return AAnalysis(analysis_id=result['analysis_id'], a_hash=result['a_hash'],
+                         file_kind='hwpx', analysis_status=result['analysis_status'],
+                         warnings=result['warnings'], fields=public_fields(result), normalizedIndex=None)
     candidates = _build_candidates(xml_result, a_bytes, a_sha256)
     return AAnalysis(
         analysis_id=_analysis_id(a_sha256),

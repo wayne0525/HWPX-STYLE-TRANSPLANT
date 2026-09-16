@@ -179,7 +179,8 @@ def read_hwpx(hwp: bytes) -> ReadResult:
             {"count": len(names), "limit": _MAX_ENTRY_COUNT},
         )
 
-    return _read_zip(zf, names, raw)
+    with zf:
+        return _read_zip(zf, names, raw)
 
 
 def _read_zip(zf: zipfile.ZipFile, names: list[str], raw: bytes) -> ReadResult:
@@ -217,7 +218,11 @@ def _read_zip(zf: zipfile.ZipFile, names: list[str], raw: bytes) -> ReadResult:
                 {"path": path, "compress_type": info.compress_type},
             )
 
-        raw_bytes = zf.read(path)
+        remaining = _MAX_DECOMPRESS_BYTES - total_decompress
+        if info.file_size > remaining:
+            raise DomainError(DECOMPRESS_SIZE_EXCEEDED, "decompressed size exceeds limit", {})
+        with zf.open(info) as entry:
+            raw_bytes = entry.read(remaining + 1)
 
         # CRC 검증
         expected_crc = info.CRC
@@ -318,7 +323,7 @@ def _check_path_safety(path: str) -> None:
         )
     # 절대 경로 거부 (zip은 보통 상대/루트 기준인데, HWPX 관점에서
     # 루트를 넘는 절대 윈도 경로 등도 막는다)
-    if path.startswith("//") or (len(path) >= 2 and path[0] == "/" and path[1] == "/"):
+    if path.startswith(("/", "\\")):
         raise DomainError(
             PATH_ESCAPE,
             "path escapes root",
@@ -362,7 +367,7 @@ def _check_needed_xml(items: list[_Item]) -> None:
     않는다. analyze 단계에서 section 존재/순서 검증을 더 엄격히 할 수 있다.
     """
     paths = {it.path for it in items}
-    if "Content.hpf" not in paths:
+    if not {"Content.hpf", "Contents/content.hpf"}.intersection(paths):
         raise DomainError(
             NEEDED_XML_MISSING,
             "Content.hpf missing",
