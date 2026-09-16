@@ -7,3 +7,4 @@ UPSTAGE_API_KEY.md
 
 # Python
 __pycache__/
+.venv/
