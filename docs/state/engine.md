@@ -253,6 +253,7 @@ OK  reference/qualifier/SKILL.md
   - 사용자 편집 값이 있으면 자동 제안이 덮어쓰지 못하게 user_value_protected로 보호한다.
   - 규칙 연결 결과가 suggested가 아니면(conflict/review 등) 제안으로 덮어쓰지 않고 blocked/review 상태를 보존한다.
   - tests/engine/test_evidence.py는 unittest로 10개 전부 통과했다.
+|- E10: hwpx/generate.py에 generate_result 구현(원본 ZIP에서 승인된 hp:t 텍스트만 XML escape로 교체, 미선택/빈 자동 제안 유지, 선택된 수동 비우기 지원, 동일 fieldId 선택 중복 시 conflict 오류), tests/engine/test_generate.py(unittest 4개) 작성·통과. hwpx/validate.py에 validate_output 구현(mimetype 첫 엔트리·비압축, ZIP/XML 재열기, 고정 문구·표 격자·병합·보호 구간 보존, 적용값 재검출), tests/engine/test_validation.py(unittest 3개) 작성·통과. 실제 결과: generate 4개 전부 통과, validate 3개 전부 통과. 구조 손상·허용 외 변경은 errors로 거부하고 정상 파일은 report와 output bytes를 반환함.
 
 ## 남은 문제
 
