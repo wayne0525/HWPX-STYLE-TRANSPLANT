@@ -2,6 +2,8 @@
 import json
 import os
 import time
+import logging
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 SYSTEM = '''A는 보존할 양식이고 B는 내용 원문이다
@@ -14,6 +16,33 @@ evidenceQuote는 해당 블록의 연속된 원문이고 value는 그 인용문 
 
 def api_key():
     return os.environ.get('UPSTAGE_API_KEY') or os.environ.get('SOLAR_API_KEY')
+
+
+class TruncatedResponse(ValueError):
+    pass
+
+
+def read_response(request, deadline):
+    for attempt in range(2):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError()
+        try:
+            with urlopen(request, timeout=min(30, remaining)) as response:
+                return response.read(200001)
+        except (HTTPError, URLError, TimeoutError, ConnectionError) as exc:
+            retryable = not isinstance(exc, HTTPError) or exc.code == 429 or 500 <= exc.code < 600
+            delay = 1.0
+            if isinstance(exc, HTTPError):
+                retry_after = exc.headers.get('Retry-After', '') if exc.headers else ''
+                if retry_after:
+                    try:
+                        delay = max(0, float(retry_after))
+                    except ValueError:
+                        retryable = False
+            if attempt or not retryable or deadline - time.monotonic() <= delay + 1:
+                raise
+            time.sleep(delay)
 
 
 def suggest(fields, blocks):
@@ -48,11 +77,13 @@ def suggest(fields, blocks):
         try:
             request = Request('https://api.upstage.ai/v1/chat/completions', body,
                               {'Authorization': 'Bearer ' + api_key(), 'Content-Type': 'application/json'})
-            with urlopen(request, timeout=max(1, min(15, deadline - time.monotonic()))) as response:
-                raw = response.read(200001)
+            raw = read_response(request, deadline)
             if len(raw) > 200000:
                 raise ValueError('response too large')
-            text = json.loads(raw)['choices'][0]['message']['content'].strip()
+            choice = json.loads(raw)['choices'][0]
+            if choice.get('finish_reason') == 'length':
+                raise TruncatedResponse()
+            text = choice['message']['content'].strip()
             if text.startswith('```') and text.endswith('```'):
                 text = text.split('\n', 1)[1].rsplit('```', 1)[0]
             items = json.loads(text)['suggestions']
@@ -63,6 +94,19 @@ def suggest(fields, blocks):
             returned = {p.get('fieldId') for p in items if isinstance(p, dict)}
             if allowed - returned:
                 warnings.append(f'이 배치의 {len(allowed - returned)}개 입력란은 제안이 없습니다')
-        except Exception:
-            warnings.append(f'{start + 1}번 입력란부터의 Solar 배치가 실패했습니다 수동 입력하거나 다시 시도하세요')
+        except Exception as exc:
+            if isinstance(exc, TruncatedResponse):
+                code = 'RESPONSE_TRUNCATED'
+            elif isinstance(exc, HTTPError):
+                code = f'HTTP_{exc.code}'
+            elif isinstance(exc, TimeoutError):
+                code = 'TIMEOUT'
+            elif isinstance(exc, URLError):
+                code = 'TIMEOUT' if isinstance(exc.reason, TimeoutError) else 'CONNECTION_FAILED'
+            elif isinstance(exc, (ValueError, KeyError, IndexError, TypeError, AttributeError)):
+                code = 'RESPONSE_INVALID'
+            else:
+                code = 'REQUEST_FAILED'
+            logging.getLogger(__name__).warning('Solar failure code=%s type=%s', code, type(exc).__name__)
+            warnings.append(f'{start + 1}번 입력란부터의 Solar 배치 실패 [{code}] 수동 입력하거나 다시 시도하세요')
     return proposals, warnings
